@@ -5,7 +5,7 @@
 #bash Miniforge3-$(uname)-$(uname -m).sh
 
 # To use:
-#   $ mamba env create -f environment.yml  # `mamba` works too for this command
+#   $ mamba env create -f nemo_eos_dev.yml  # `mamba` works too for this command
 #   $ mamba activate nemo_eos_dev
 #
 name: nemo_eos_dev
@@ -18,5 +18,5 @@ dependencies:
   - numpy
   - pkg-config
   - pybind11
-  - python
+  - python==3.10
   - cython>=3.0.4
