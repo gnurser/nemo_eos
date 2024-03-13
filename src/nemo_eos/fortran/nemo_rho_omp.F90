@@ -1,7 +1,3 @@
-# 1 "nemo_rho_omp.F90"
-# 1 "<built-in>"
-# 1 "<command-line>"
-# 1 "nemo_rho_omp.F90"
 module eos
   ! to compile for python on linux with ifort, do
   ! dof2py2 -x '-openmp -D__OPENMP -fast ' --open_mp nemo_rho.F90
@@ -13,8 +9,8 @@ module eos
   REAL*8 :: rn_beta = 7.7e-4
   INTEGER*4 :: neos = 0
   REAL*8 :: fillvalue = 0.d0
-  real*8, allocatable :: re3w(:,:,:)
-  LOGICAL(KIND=1), allocatable :: mask3d(:,:,:)
+  ! real*8, allocatable :: re3w(:,:,:)
+  ! LOGICAL(KIND=1), allocatable :: mask3d(:,:,:)
   REAL*8 :: S00 = 35.
   REAL*8 :: theta00 = 10.
   REAL*8 :: rho000 = 26.9524116
@@ -430,6 +426,7 @@ contains
 
     if (neos==0) then   !==  Jackett and McDougall (1994) formulation  ==!
        if (depth_km > 1.e-4) then
+          !$omp parallel do private(zt,zs,zh,zsr,zr1,zr2,zr3,zr4,zrhop,ze, zbw,zb, zd, zc, zaw, za, zb1, za1, zkw, zk0)
           do i=1,n
              zt = theta(i)
              zs = S(i)
@@ -465,8 +462,10 @@ contains
              !
              ! masked in situ density anomaly
              rho(i) = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0
+          !$omp  end parallel do
           end do
        else   ! sigma0
+          !$omp parallel do private(zt,zs,zsr,zr1,zr2,zr3,zr4,zrhop)
           do i=1,n
              zt = theta(i)
              zs = S(i)
@@ -485,6 +484,7 @@ contains
              zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
              ! masked in situ density anomaly
              rho(i) = zrhop - 1000.d0
+          !$omp  end parallel do
           end do
        end if
        ! ************************* old NEMO way *************
@@ -521,12 +521,16 @@ contains
 
   SUBROUTINE sigma_n8(fillvalue,mask,theta,S,n,depth_km,rho)
     !!----------------------------------------------------------------------
-    !!                  ***  ROUTINE eos_insitu_pot  ***
+    !!                  ***  sigma_n8  ***
     !!
-    !! ** Purpose :   Compute the in situ density (ratio rho/rau0) and the
-    !!      potential volumic mass (Kg/m3) from potential temperature and
+    !! ** Purpose :   Compute the  density (ratio rho/rau0) and the
+    !!      potential volumic mass (Kg/m3)potential density anomaly at depth depth_km
+    !!     from potential temperature and
     !!      salinity fields using an equation of state defined through the
-    !!     namelist parameter nn_eos.
+    !!     namelist parameter neos. A boolean mask (mask=.T. over land) must be supplied
+    !!      and a fill value for those masked points.
+    !!
+    !!    All fields are assumed to be real*8
     !!
     !! ** Method  :
     !!      nn_eos = 0 : Jackett and McDougall (1994) equation of state.
@@ -565,6 +569,7 @@ contains
 
     if (neos==0) then   !==  Jackett and McDougall (1994) formulation  ==!
        if (depth_km > 1.e-4) then
+          !$omp parallel do private(zt,zs,zh,zsr,zr1,zr2,zr3,zr4,zrhop,ze, zbw,zb, zd, zc, zaw, za, zb1, za1, zkw, zk0)
           do i=1,n
              if (mask(i)) then
                 rho(i) = fillvalue
@@ -605,7 +610,9 @@ contains
              ! masked in situ density anomaly
              rho(i) = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0
           end do
+          !$omp  end parallel do
        else   ! sigma0
+          !$omp parallel do private(zt,zs,zsr,zr1,zr2,zr3,zr4,zrhop)
           do i=1,n
              if (mask(i)) then
                 rho(i) = fillvalue
@@ -629,6 +636,7 @@ contains
              ! masked in situ density anomaly
              rho(i) = zrhop - 1000.d0
           end do
+          !$omp  end parallel do
        end if
        ! nemo uses prd = (rho-rau0)/rau0
     else if (neos==1) then  !==  Linear formulation = F( temperature )  ==!
@@ -650,13 +658,17 @@ contains
 
   SUBROUTINE sigma_n4(fillvalue, mask, theta, S, n, depth_km, rho)
     !!----------------------------------------------------------------------
-    !!                  ***  ROUTINE eos_insitu_pot  ***
+    !!                  ***  sigma_n4  ***
     !!
-    !! ** Purpose :   Compute the in situ density (ratio rho/rau0) and the
-    !!      potential volumic mass (Kg/m3) from potential temperature and
+    !! ** Purpose :   Compute the  density (ratio rho/rau0) and the
+    !!      potential volumic mass (Kg/m3)potential density anomaly at depth depth_km
+    !!     from potential temperature and
     !!      salinity fields using an equation of state defined through the
-    !!     namelist parameter nn_eos.
+    !!     namelist parameter neos. A boolean mask (mask=.T. over land) must be supplied
+    !!      and a fill value for those masked points.
     !!
+    !!    All fields are assumed to be real*4
+    !
     !! ** Method  :
     !!      nn_eos = 0 : Jackett and McDougall (1994) equation of state.
     !!         the in situ density is computed directly as a function of
@@ -787,7 +799,7 @@ contains
     !!----------------------------------------------------------------------
     !!                  ***  ROUTINE eos_bn2  ***
     !!
-    !! ** Purpose :   Compute the alpha and beta
+    !! ** Purpose :   Compute the in situ alpha and beta for masked real*4 inputs
     !!
     !! ** Method :
     !! References :   McDougall, J. Phys. Oceanogr., 17, 1950-1964, 1987.
@@ -846,7 +858,7 @@ contains
     !!----------------------------------------------------------------------
     !!                  ***  ROUTINE eos_bn2  ***
     !!
-    !! ** Purpose :   Compute the alpha and beta
+    !! ** Purpose :   Compute the alpha and beta at depth depth_km  for masked real*4 inputs
     !!
     !! ** Method :
     !! References :   McDougall, J. Phys. Oceanogr., 17, 1950-1964, 1987.
@@ -905,7 +917,7 @@ contains
     !!----------------------------------------------------------------------
     !!                  ***  ROUTINE eos_bn2  ***
     !!
-    !! ** Purpose :   Compute surface alpha and beta
+    !! ** Purpose :   Compute surface alpha and beta for masked real*4 S & T
     !!
     !! ** Method :
     !! References :   McDougall, J. Phys. Oceanogr., 17, 1950-1964, 1987.
@@ -962,7 +974,7 @@ contains
     !!----------------------------------------------------------------------
     !!                  ***  ROUTINE eos_bn2  ***
     !!
-    !! ** Purpose :   Compute the alpha and beta
+    !! ** Purpose :   Compute the in situ alpha and beta for masked real*8 inputs
     !!
     !! ** Method :
     !! References :   McDougall, J. Phys. Oceanogr., 17, 1950-1964, 1987.
@@ -1019,7 +1031,7 @@ contains
     !!----------------------------------------------------------------------
     !!                  ***  ROUTINE eos_bn2  ***
     !!
-    !! ** Purpose :   Compute the alpha and beta
+    !! ** Purpose :   Compute the alpha and beta at depth depth_km for unmasked real*8 T & S
     !!
     !! ** Method :
     !! References :   McDougall, J. Phys. Oceanogr., 17, 1950-1964, 1987.
