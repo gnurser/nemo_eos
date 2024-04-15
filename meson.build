@@ -48,6 +48,7 @@ py.extension_module('nemo_rho_omp',
   fortranobject_c,
   include_directories: inc_np,
   dependencies : py_dep,
+  fortran_args : ['-fopenmp'],
   link_args : ['-lgomp'],
   install : true,
   # install_rpath: '/Users/agn/miniforge3/envs/big/lib',
@@ -60,7 +61,7 @@ nemo_rho_teos10_omp_source = custom_target('nemo_rho_teos10_ompmodule.c',
 )
 py.extension_module('nemo_rho_teos10_omp',
   [
-    'src/nemo_eos/tempdir/nemo_rho_teos10_omp.f90', nemo_rho_teos10_omp_source
+    'src/nemo_eos/fortran/nemo_rho_teos10_omp.F90', nemo_rho_teos10_omp_source
   ],
   fortranobject_c,
   include_directories: inc_np,
