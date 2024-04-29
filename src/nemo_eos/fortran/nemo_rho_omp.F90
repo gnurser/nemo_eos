@@ -1,7 +1,7 @@
 module eos
   ! to compile for python on linux with ifort, do
   ! dof2py2 -x '-openmp -D__OPENMP -fast ' --open_mp nemo_rho.F90
-  USE OMP_LIB, ONLY : omp_set_num_threads
+  USE OMP_LIB, ONLY : omp_set_num_threads, omp_get_thread_num, omp_get_max_threads
   IMPLICIT NONE
   REAL*8 :: grav  = 9.80665
   REAL*8 :: rn_alpha = 2.e-4
@@ -19,6 +19,11 @@ contains
     INTEGER*4, INTENT(IN)  :: nthreads
     CALL omp_set_num_threads(nthreads)
   END SUBROUTINE set_eos_threads
+
+  SUBROUTINE get_eos_threads(nthreads)
+    INTEGER*4, INTENT(OUT)  :: nthreads
+    nthreads = omp_get_max_threads()
+  END SUBROUTINE get_eos_threads
 
   SUBROUTINE set_eos(neos_in)
     INTEGER*4, INTENT(IN)  :: neos_in
@@ -147,7 +152,7 @@ contains
     REAL*4, INTENT(IN) ::   fillvalue,theta(n),S(n)
     REAL*4, INTENT(IN) ::   depth(n)
     REAL*4, INTENT(OUT) ::  rho(n)
-    !f2py intent (in) theta,S,depth,n
+    !f2py intent (in) fillvalue,mask,theta,S,depth,n
     !f2py intent (out) rho
 
     INTEGER*4 :: i
@@ -462,8 +467,8 @@ contains
              !
              ! masked in situ density anomaly
              rho(i) = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0
-          !$omp  end parallel do
           end do
+          !$omp  end parallel do
        else   ! sigma0
           !$omp parallel do private(zt,zs,zsr,zr1,zr2,zr3,zr4,zrhop)
           do i=1,n
@@ -484,8 +489,8 @@ contains
              zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
              ! masked in situ density anomaly
              rho(i) = zrhop - 1000.d0
-          !$omp  end parallel do
           end do
+          !$omp  end parallel do
        end if
        ! ************************* old NEMO way *************
        ! nemo uses prd = (rho-rau0)/rau0
