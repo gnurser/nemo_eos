@@ -44,14 +44,14 @@ MODULE eosbn2
 
    INTEGER     ::   neos            ! Identifier for equation of state used
 
-   INTEGER , PARAMETER ::   np_teos10    = -1 ! parameter for using TEOS10
-   INTEGER , PARAMETER ::   np_eos80     =  0 ! parameter for using EOS80
-   INTEGER , PARAMETER ::   np_old_eos80 =  2 ! parameter for using Macdougall and Jackett EOS80
-   INTEGER , PARAMETER ::   np_seos      =  1 ! parameter for using Simplified Equation of state
+   INTEGER, PRIVATE , PARAMETER ::   np_teos10    = -1 ! parameter for using TEOS10
+   INTEGER, PRIVATE , PARAMETER ::   np_eos80     =  0 ! parameter for using EOS80
+   INTEGER, PRIVATE , PARAMETER ::   np_old_eos80 =  2 ! parameter for using Macdougall and Jackett EOS80
+   INTEGER, PRIVATE , PARAMETER ::   np_seos      =  1 ! parameter for using Simplified Equation of state
 
    REAL*8 ::  rho0        = 1026.d0          !: volumic mass of reference     [kg/m3]
-   REAL*8 ::  r1_rho0                    ! reciprocal of volumic mass of reference     [kg/m3]
-   REAL*8 ::  grav     = 9.80665d0       !: gravity                            [m/s2]
+   REAL*8, PRIVATE ::  r1_rho0                    ! reciprocal of volumic mass of reference     [kg/m3]
+   ! REAL*8, PRIVATE ::  grav     = 9.80665d0       !: gravity                            [m/s2]
 
    !                               !!!  simplified eos coefficients (default value: Vallis 2006)
    REAL*8 ::   rn_a0      = 1.6550d-1     ! thermal expansion coeff.
@@ -63,93 +63,93 @@ MODULE eosbn2
    REAL*8 ::   rn_nu      = 2.4341d-3     ! cabbeling coeff. in theta*salt
 
    ! TEOS10/EOS80 parameters
-   REAL*8 ::   r1_S0, r1_T0, r1_Z0, rdeltaS
+   REAL*8, PRIVATE ::   r1_S0, r1_T0, r1_Z0, rdeltaS
 
-   REAL*8, PARAMETER ::     R00 = 4.6494977072d+01
-   REAL*8, PARAMETER ::     R01 = -5.2099962525d+00
-   REAL*8, PARAMETER ::     R02 = 2.2601900708d-01
-   REAL*8, PARAMETER ::     R03 = 6.4326772569d-02
-   REAL*8, PARAMETER ::     R04 = 1.5616995503d-02
-   REAL*8, PARAMETER ::     R05 = -1.7243708991d-03
+   REAL*8, PRIVATE, PARAMETER ::     R00 = 4.6494977072d+01
+   REAL*8, PRIVATE, PARAMETER ::     R01 = -5.2099962525d+00
+   REAL*8, PRIVATE, PARAMETER ::     R02 = 2.2601900708d-01
+   REAL*8, PRIVATE, PARAMETER ::     R03 = 6.4326772569d-02
+   REAL*8, PRIVATE, PARAMETER ::     R04 = 1.5616995503d-02
+   REAL*8, PRIVATE, PARAMETER ::     R05 = -1.7243708991d-03
 
    ! EOS parameters
-   REAL*8 ::   EOS000 , EOS100 , EOS200 , EOS300 , EOS400 , EOS500 , EOS600
-   REAL*8 ::   EOS010 , EOS110 , EOS210 , EOS310 , EOS410 , EOS510
-   REAL*8 ::   EOS020 , EOS120 , EOS220 , EOS320 , EOS420
-   REAL*8 ::   EOS030 , EOS130 , EOS230 , EOS330
-   REAL*8 ::   EOS040 , EOS140 , EOS240
-   REAL*8 ::   EOS050 , EOS150
-   REAL*8 ::   EOS060
-   REAL*8 ::   EOS001 , EOS101 , EOS201 , EOS301 , EOS401
-   REAL*8 ::   EOS011 , EOS111 , EOS211 , EOS311
-   REAL*8 ::   EOS021 , EOS121 , EOS221
-   REAL*8 ::   EOS031 , EOS131
-   REAL*8 ::   EOS041
-   REAL*8 ::   EOS002 , EOS102 , EOS202
-   REAL*8 ::   EOS012 , EOS112
-   REAL*8 ::   EOS022
-   REAL*8 ::   EOS003 , EOS103
-   REAL*8 ::   EOS013
+   REAL*8, PRIVATE ::   EOS000 , EOS100 , EOS200 , EOS300 , EOS400 , EOS500 , EOS600
+   REAL*8, PRIVATE ::   EOS010 , EOS110 , EOS210 , EOS310 , EOS410 , EOS510
+   REAL*8, PRIVATE ::   EOS020 , EOS120 , EOS220 , EOS320 , EOS420
+   REAL*8, PRIVATE ::   EOS030 , EOS130 , EOS230 , EOS330
+   REAL*8, PRIVATE ::   EOS040 , EOS140 , EOS240
+   REAL*8, PRIVATE ::   EOS050 , EOS150
+   REAL*8, PRIVATE ::   EOS060
+   REAL*8, PRIVATE ::   EOS001 , EOS101 , EOS201 , EOS301 , EOS401
+   REAL*8, PRIVATE ::   EOS011 , EOS111 , EOS211 , EOS311
+   REAL*8, PRIVATE ::   EOS021 , EOS121 , EOS221
+   REAL*8, PRIVATE ::   EOS031 , EOS131
+   REAL*8, PRIVATE ::   EOS041
+   REAL*8, PRIVATE ::   EOS002 , EOS102 , EOS202
+   REAL*8, PRIVATE ::   EOS012 , EOS112
+   REAL*8, PRIVATE ::   EOS022
+   REAL*8, PRIVATE ::   EOS003 , EOS103
+   REAL*8, PRIVATE ::   EOS013
 
    ! ALPHA parameters
-   REAL*8 ::   ALP000 , ALP100 , ALP200 , ALP300 , ALP400 , ALP500
-   REAL*8 ::   ALP010 , ALP110 , ALP210 , ALP310 , ALP410
-   REAL*8 ::   ALP020 , ALP120 , ALP220 , ALP320
-   REAL*8 ::   ALP030 , ALP130 , ALP230
-   REAL*8 ::   ALP040 , ALP140
-   REAL*8 ::   ALP050
-   REAL*8 ::   ALP001 , ALP101 , ALP201 , ALP301
-   REAL*8 ::   ALP011 , ALP111 , ALP211
-   REAL*8 ::   ALP021 , ALP121
-   REAL*8 ::   ALP031
-   REAL*8 ::   ALP002 , ALP102
-   REAL*8 ::   ALP012
-   REAL*8 ::   ALP003
+   REAL*8, PRIVATE ::   ALP000 , ALP100 , ALP200 , ALP300 , ALP400 , ALP500
+   REAL*8, PRIVATE ::   ALP010 , ALP110 , ALP210 , ALP310 , ALP410
+   REAL*8, PRIVATE ::   ALP020 , ALP120 , ALP220 , ALP320
+   REAL*8, PRIVATE ::   ALP030 , ALP130 , ALP230
+   REAL*8, PRIVATE ::   ALP040 , ALP140
+   REAL*8, PRIVATE ::   ALP050
+   REAL*8, PRIVATE ::   ALP001 , ALP101 , ALP201 , ALP301
+   REAL*8, PRIVATE ::   ALP011 , ALP111 , ALP211
+   REAL*8, PRIVATE ::   ALP021 , ALP121
+   REAL*8, PRIVATE ::   ALP031
+   REAL*8, PRIVATE ::   ALP002 , ALP102
+   REAL*8, PRIVATE ::   ALP012
+   REAL*8, PRIVATE ::   ALP003
 
    ! BETA parameters
-   REAL*8 ::   BET000 , BET100 , BET200 , BET300 , BET400 , BET500
-   REAL*8 ::   BET010 , BET110 , BET210 , BET310 , BET410
-   REAL*8 ::   BET020 , BET120 , BET220 , BET320
-   REAL*8 ::   BET030 , BET130 , BET230
-   REAL*8 ::   BET040 , BET140
-   REAL*8 ::   BET050
-   REAL*8 ::   BET001 , BET101 , BET201 , BET301
-   REAL*8 ::   BET011 , BET111 , BET211
-   REAL*8 ::   BET021 , BET121
-   REAL*8 ::   BET031
-   REAL*8 ::   BET002 , BET102
-   REAL*8 ::   BET012
-   REAL*8 ::   BET003
+   REAL*8, PRIVATE ::   BET000 , BET100 , BET200 , BET300 , BET400 , BET500
+   REAL*8, PRIVATE ::   BET010 , BET110 , BET210 , BET310 , BET410
+   REAL*8, PRIVATE ::   BET020 , BET120 , BET220 , BET320
+   REAL*8, PRIVATE ::   BET030 , BET130 , BET230
+   REAL*8, PRIVATE ::   BET040 , BET140
+   REAL*8, PRIVATE ::   BET050
+   REAL*8, PRIVATE ::   BET001 , BET101 , BET201 , BET301
+   REAL*8, PRIVATE ::   BET011 , BET111 , BET211
+   REAL*8, PRIVATE ::   BET021 , BET121
+   REAL*8, PRIVATE ::   BET031
+   REAL*8, PRIVATE ::   BET002 , BET102
+   REAL*8, PRIVATE ::   BET012
+   REAL*8, PRIVATE ::   BET003
 
    ! PEN parameters
-   REAL*8 ::   PEN000 , PEN100 , PEN200 , PEN300 , PEN400
-   REAL*8 ::   PEN010 , PEN110 , PEN210 , PEN310
-   REAL*8 ::   PEN020 , PEN120 , PEN220
-   REAL*8 ::   PEN030 , PEN130
-   REAL*8 ::   PEN040
-   REAL*8 ::   PEN001 , PEN101 , PEN201
-   REAL*8 ::   PEN011 , PEN111
-   REAL*8 ::   PEN021
-   REAL*8 ::   PEN002 , PEN102
-   REAL*8 ::   PEN012
+   REAL*8, PRIVATE ::   PEN000 , PEN100 , PEN200 , PEN300 , PEN400
+   REAL*8, PRIVATE ::   PEN010 , PEN110 , PEN210 , PEN310
+   REAL*8, PRIVATE ::   PEN020 , PEN120 , PEN220
+   REAL*8, PRIVATE ::   PEN030 , PEN130
+   REAL*8, PRIVATE ::   PEN040
+   REAL*8, PRIVATE ::   PEN001 , PEN101 , PEN201
+   REAL*8, PRIVATE ::   PEN011 , PEN111
+   REAL*8, PRIVATE ::   PEN021
+   REAL*8, PRIVATE ::   PEN002 , PEN102
+   REAL*8, PRIVATE ::   PEN012
 
    ! ALPHA_PEN parameters
-   REAL*8 ::   APE000 , APE100 , APE200 , APE300
-   REAL*8 ::   APE010 , APE110 , APE210
-   REAL*8 ::   APE020 , APE120
-   REAL*8 ::   APE030
-   REAL*8 ::   APE001 , APE101
-   REAL*8 ::   APE011
-   REAL*8 ::   APE002
+   REAL*8, PRIVATE ::   APE000 , APE100 , APE200 , APE300
+   REAL*8, PRIVATE ::   APE010 , APE110 , APE210
+   REAL*8, PRIVATE ::   APE020 , APE120
+   REAL*8, PRIVATE ::   APE030
+   REAL*8, PRIVATE ::   APE001 , APE101
+   REAL*8, PRIVATE ::   APE011
+   REAL*8, PRIVATE ::   APE002
 
    ! BETA_PEN parameters
-   REAL*8 ::   BPE000 , BPE100 , BPE200 , BPE300
-   REAL*8 ::   BPE010 , BPE110 , BPE210
-   REAL*8 ::   BPE020 , BPE120
-   REAL*8 ::   BPE030
-   REAL*8 ::   BPE001 , BPE101
-   REAL*8 ::   BPE011
-   REAL*8 ::   BPE002
+   REAL*8, PRIVATE ::   BPE000 , BPE100 , BPE200 , BPE300
+   REAL*8, PRIVATE ::   BPE010 , BPE110 , BPE210
+   REAL*8, PRIVATE ::   BPE020 , BPE120
+   REAL*8, PRIVATE ::   BPE030
+   REAL*8, PRIVATE ::   BPE001 , BPE101
+   REAL*8, PRIVATE ::   BPE011
+   REAL*8, PRIVATE ::   BPE002
 
 CONTAINS
 
@@ -342,7 +342,7 @@ CONTAINS
             zk0= ( zb1*zsr + za1 )*zs + zkw
             !
             ! masked in situ density anomaly
-            rho(i) = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0
+            rho(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0, KIND=4)
          END DO
       END SELECT
       !
@@ -511,7 +511,7 @@ CONTAINS
             zk0= ( zb1*zsr + za1 )*zs + zkw
             !
             ! masked in situ density anomaly
-            rho(i) = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0
+            rho(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0, KIND=4)
          END DO
        END SELECT
       !
@@ -869,7 +869,7 @@ CONTAINS
       !
       INTEGER  ::  i
 
-      REAL*8  :: zt, zh, zstemp ! local scalars
+      REAL*8  :: zt ! local scalars
       REAL*8  :: zs! local scalars
       REAL*8  :: zn, zn0!   -      -
       ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
@@ -924,7 +924,7 @@ CONTAINS
              ! potential volumic mass (reference to the surface)
              zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
              ! masked in situ density anomaly
-             sigma0(i) = zrhop - 1000.d0
+             sigma0(i) = REAL(zrhop - 1000.d0, KIND=4)
           END DO
       END SELECT
       !
@@ -955,7 +955,7 @@ CONTAINS
       !
       INTEGER  ::  i
 
-      REAL*8  :: zt, zh, zstemp ! local scalars
+      REAL*8  :: zt ! local scalars
       REAL*8  :: zs! local scalars
       REAL*8  :: zn, zn0!   -      -
       ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
@@ -1022,7 +1022,7 @@ CONTAINS
              ! potential volumic mass (reference to the surface)
              zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
              ! masked in situ density anomaly
-             sigma0(i) = zrhop - 1000.d0
+             sigma0(i) = REAL(zrhop - 1000.d0, KIND=4)
           END DO
       END SELECT
       !
@@ -1142,7 +1142,8 @@ CONTAINS
                  &        +(   0.791325d-08 * zt - 0.933746d-06 ) * zt   &
                  &                                  + 0.380374d-04 ) * zh
             !
-            beta(i) = ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
+            beta(i) = REAL( &
+                 &   ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
                  &                               - 0.301985d-05 ) * zt      &
                  &   +       0.785567d-03                                   &
                  &   + (     0.515032d-08 * zs                              &
@@ -1152,8 +1153,9 @@ CONTAINS
                  &         - 0.175379d-14 * zt + 0.176621d-12 ) * zh     &
                  &                                + 0.408195d-10   * zs     &
                  &     + ( - 0.213127d-11 * zt + 0.192867d-09 ) * zt     &
-                 &                                - 0.121555d-07 ) * zh
-            alpha(i) = zalbet*beta(i)
+                 &                                - 0.121555d-07 ) * zh  &
+                 &    , KIND=4)
+            alpha(i) = REAL(zalbet*beta(i), KIND=4)
          END DO
       END SELECT
       !
@@ -1288,9 +1290,10 @@ CONTAINS
                  &           + 0.512857d-12 * zt * zt              ) * zh   &
                  &           - 0.164759d-06 * zs                            &
                  &        +(   0.791325d-08 * zt - 0.933746d-06 ) * zt   &
-                 &                                  + 0.380374d-04 ) * zh
+                 &                                  + 0.380374d-04 ) * zh 
             !
-            beta(i) = ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
+            beta(i) = REAL( &
+                 &   ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
                  &                               - 0.301985d-05 ) * zt      &
                  &   +       0.785567d-03                                   &
                  &   + (     0.515032d-08 * zs                              &
@@ -1300,8 +1303,9 @@ CONTAINS
                  &         - 0.175379d-14 * zt + 0.176621d-12 ) * zh     &
                  &                                + 0.408195d-10   * zs     &
                  &     + ( - 0.213127d-11 * zt + 0.192867d-09 ) * zt     &
-                 &                                - 0.121555d-07 ) * zh
-            alpha(i) = zalbet*beta(i)
+                 &                                - 0.121555d-07 ) * zh &
+                 &   , KIND=4)
+            alpha(i) = REAL( zalbet*beta(i), KIND=4)
          END DO
          !
       END SELECT
@@ -1420,7 +1424,8 @@ CONTAINS
                  &        +(   0.791325d-08 * zt - 0.933746d-06 ) * zt   &
                  &                                  + 0.380374d-04 ) * zh
             !
-            beta(i) = ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
+            beta(i) = REAL( &
+                 &   ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
                  &                               - 0.301985d-05 ) * zt      &
                  &   +       0.785567d-03                                   &
                  &   + (     0.515032d-08 * zs                              &
@@ -1430,8 +1435,9 @@ CONTAINS
                  &         - 0.175379d-14 * zt + 0.176621d-12 ) * zh     &
                  &                                + 0.408195d-10   * zs     &
                  &     + ( - 0.213127d-11 * zt + 0.192867d-09 ) * zt     &
-                 &                                - 0.121555d-07 ) * zh
-            alpha(i) = zalbet*beta(i)
+                 &                                - 0.121555d-07 ) * zh  &
+                 &    , KIND=4)
+            alpha(i) = REAL(zalbet*beta(i), KIND=4)
          END DO
       END SELECT
       !
@@ -1563,7 +1569,8 @@ CONTAINS
                  &        +(   0.791325d-08 * zt - 0.933746d-06 ) * zt   &
                  &                                  + 0.380374d-04 ) * zh
             !
-            beta(i) = ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
+            beta(i) = REAL( &
+                 &   ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
                  &                               - 0.301985d-05 ) * zt      &
                  &   +       0.785567d-03                                   &
                  &   + (     0.515032d-08 * zs                              &
@@ -1573,8 +1580,9 @@ CONTAINS
                  &         - 0.175379d-14 * zt + 0.176621d-12 ) * zh     &
                  &                                + 0.408195d-10   * zs     &
                  &     + ( - 0.213127d-11 * zt + 0.192867d-09 ) * zt     &
-                 &                                - 0.121555d-07 ) * zh
-            alpha(i) = zalbet*beta(i)
+                 &                                - 0.121555d-07 ) * zh &
+                 & , KIND=4)
+            alpha(i) = REAL(zalbet*beta(i), KIND=4)
          END DO
       END SELECT
       !
@@ -1833,7 +1841,7 @@ CONTAINS
                !
             zn  = ( zn2 * zh + zn1 ) * zh + zn0
             !
-            ppen(i)  = zn * zh * r1_rho0
+            ppen(i)  = REAL(zn * zh * r1_rho0, KIND=4)
             !
             ! alphaPE non-linear anomaly
             zn2 = APE002
@@ -1848,7 +1856,7 @@ CONTAINS
                !
             zn  = ( zn2 * zh + zn1 ) * zh + zn0
             !
-            alpha_pe(i) = zn * zh * r1_rho0
+            alpha_pe(i) = REAL(zn * zh * r1_rho0, KIND=4)
             !
             ! betaPE non-linear anomaly
             zn2 = BPE002
@@ -1863,7 +1871,7 @@ CONTAINS
                !
             zn  = ( zn2 * zh + zn1 ) * zh + zn0
             !
-            beta_pe(i) = zn / zs * zh * r1_rho0
+            beta_pe(i) = REAL(zn / zs * zh * r1_rho0, KIND=4)
             !
          END DO
          !
@@ -1876,10 +1884,10 @@ CONTAINS
 
             zn  = 0.5d0 * zh * r1_rho0
             !                                    ! Potential Energy
-            ppen(i) = ( rn_a0 * rn_mu1 * zt + rn_b0 * rn_mu2 * zs ) * zn
+            ppen(i) = REAL(( rn_a0 * rn_mu1 * zt + rn_b0 * rn_mu2 * zs ) * zn, KIND=4)
             !                                    ! alphaPE
-            alpha_pe(i) = - rn_a0 * rn_mu1 * zn
-            beta_pe(i) =   rn_b0 * rn_mu2 * zn
+            alpha_pe(i) = - REAL(rn_a0 * rn_mu1 * zn, KIND=4)
+            beta_pe(i) =   REAL(rn_b0 * rn_mu2 * zn, KIND=4)
             !
          END DO
          !
