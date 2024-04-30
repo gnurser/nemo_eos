@@ -21,7 +21,7 @@ MODULE eosbn2
    !!             -   ! 2013-04  (F. Roquet, G. Madec)  add eos_rab, change bn2 computation and reorganize the module
    !!             -   ! 2014-09  (F. Roquet)  add TEOS-10, S-EOS, and modify EOS-80
    !!             -   ! 2015-06  (P.A. Bouttier) eos_fzp functions changed to subroutines for AGRIF
-   !!           4.2.x ! 2024-04  (G. Nurser) modified to be wrapped by f2py 
+   !!           4.2.x ! 2024-04  (G. Nurser) modified to be wrapped by f2py
    !!----------------------------------------------------------------------
 
    !!----------------------------------------------------------------------
@@ -38,19 +38,19 @@ MODULE eosbn2
    !!   eos_fzp_0d    : freezing temperature for scalar
    !!   eos_init      : set eos parameters (namelist)
    !!----------------------------------------------------------------------
- 
-   IMPLICIT NONE
-   PRIVATE
 
-    !                               !!** Namelist nameos **
+   USE OMP_LIB, ONLY : omp_set_num_threads, omp_get_thread_num, omp_get_max_threads
+   IMPLICIT NONE
 
    INTEGER     ::   neos            ! Identifier for equation of state used
 
-   INTEGER , PARAMETER ::   np_teos10 = -1  ! parameter for using TEOS10
-   INTEGER , PARAMETER ::   np_eos80  =  0  ! parameter for using EOS80
-   INTEGER , PARAMETER ::   np_seos   = 1   ! parameter for using Simplified Equation of state
+   INTEGER , PARAMETER ::   np_teos10    = -1 ! parameter for using TEOS10
+   INTEGER , PARAMETER ::   np_eos80     =  0 ! parameter for using EOS80
+   INTEGER , PARAMETER ::   np_old_eos80 =  2 ! parameter for using Macdougall and Jackett EOS80
+   INTEGER , PARAMETER ::   np_seos      =  1 ! parameter for using Simplified Equation of state
 
    REAL*8 ::  rho0        = 1026.d0          !: volumic mass of reference     [kg/m3]
+   REAL*8 ::  r1_rho0                    ! reciprocal of volumic mass of reference     [kg/m3]
    REAL*8 ::  grav     = 9.80665d0       !: gravity                            [m/s2]
 
    !                               !!!  simplified eos coefficients (default value: Vallis 2006)
@@ -71,7 +71,7 @@ MODULE eosbn2
    REAL*8, PARAMETER ::     R03 = 6.4326772569d-02
    REAL*8, PARAMETER ::     R04 = 1.5616995503d-02
    REAL*8, PARAMETER ::     R05 = -1.7243708991d-03
-  
+
    ! EOS parameters
    REAL*8 ::   EOS000 , EOS100 , EOS200 , EOS300 , EOS400 , EOS500 , EOS600
    REAL*8 ::   EOS010 , EOS110 , EOS210 , EOS310 , EOS410 , EOS510
@@ -153,7 +153,22 @@ MODULE eosbn2
 
 CONTAINS
 
-    SUBROUTINE get_r0( depth_km, r0)
+     SUBROUTINE set_eos_threads(nthreads)
+       INTEGER*4, INTENT(IN)  :: nthreads
+       CALL omp_set_num_threads(nthreads)
+     END SUBROUTINE set_eos_threads
+
+     SUBROUTINE get_eos_threads(nthreads)
+       INTEGER*4, INTENT(OUT)  :: nthreads
+       nthreads = omp_get_max_threads()
+     END SUBROUTINE get_eos_threads
+
+     SUBROUTINE set_eos(neos_in)
+       INTEGER*4, INTENT(IN)  :: neos_in
+       neos = neos_in
+     END SUBROUTINE set_eos
+
+     SUBROUTINE get_r0( depth_km, r0)
       !!----------------------------------------------------------------------
       !!                  ***  ROUTINE sigma_n4  ***
       !!
@@ -164,12 +179,12 @@ CONTAINS
       !!  with
       !!     r0(z) = rho(35.16504g/kg,4 deg,z) - rho(35.16504g/kg,4 deg,0 m)
       !!       as defined in A.1 of Roquet et al. (2015)
-      !! Check value for Z = −1000 m: r0 = 4.59763035 kg /m^3 
+      !! Check value for Z = −1000 m: r0 = 4.59763035 kg /m^3
       !!
       !!----------------------------------------------------------------------
       REAL*8, INTENT(IN) ::   depth_km
       REAL*8, INTENT(OUT) ::  r0
-      !f2py intent (in) depth_km
+      !f2py intent (in) depth_kmx
       !f2py intent (out) r0
       !
       REAL*8 ::   zh              ! local scalars
@@ -178,50 +193,56 @@ CONTAINS
       zh = depth_km * 1.d3 * r1_Z0
       r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
     END SUBROUTINE get_r0
-  
-    SUBROUTINE eos_insitu4(t, s, depth, rho, n)
+
+    SUBROUTINE eos_insitu4(T, S, depth, rho, n)
       !!----------------------------------------------------------------------
       !!                   ***  ROUTINE eos_insitu  ***
       !!
-      !! ** Purpose :   Compute the in unmasked situ density deviation from 1000kg/m^3 ( rho(t,s,z)) from
+      !! ** Purpose :   Compute the in unmasked situ (density deviation from 1000kg/m^3
+      !!  rho(t,s,z)) from
       !!       potential temperature salinity and depth using an equation of state
       !!       selected in the nameos namelist
       !!
-      !! ** Method  :   rho(t,s,z)
+      !! ** Method  :   rho(t,s,z) = r0(z) + [r(t,s,z) - r0(z)] - 1000.
       !!                t      TEOS10: CT or EOS80: PT      Celsius
       !!                s      TEOS10: SA or EOS80: SP      TEOS10: g/kg or EOS80: psu
       !!                z      depth                        meters
-      !!                rho    in situ density              kg/m^3
+      !!                rho    in situ density anomaly      kg/m^3
       !!
       !!     ln_teos10 : polynomial TEOS-10 equation of state is used for rho(t,s,z).
-      !!               Note global mean r0(z) is added to perturbation r(t,s,z) = rho(t,s,z) - r0(z)
-      !!         Check value: rho = 1028.21993233072 kg/m^3 for z=3000 dbar, ct=3 Celsius, sa=35.5 g/kg
+      !!               Note global mean r0(z)
+      !!         Check value: rho = 28.21993233072 kg/m^3 for z=3000 dbar, ct=3 Celsius, sa=35.5 g/kg
       !!
       !!     ln_eos80 : polynomial EOS-80 equation of state is used for rho(t,s,z).
-      !!         Check value: rho = 1028.35011066567 kg/m^3 for z=3000 dbar, pt=3 Celsius, sp=35.5 psu
+      !!         Check value: rho = 28.35011066567 kg/m^3 for z=3000 dbar, pt=3 Celsius, sp=35.5 psu
       !!
       !!     ln_seos : simplified equation of state
-      !!              rho(t,s,z) = -a0*(1+lambda/2*(T-T0)+mu*z+nu*(S-S0))*(T-T0) + b0*(S-S0)
+      !!              rho(t,s,z) = rho0 -a0*(1+lambda/2*(T-T0)+mu*z+nu*(S-S0))*(T-T0) + b0*(S-S0) - 1000.
       !!              linear case function of T only: rn_alpha<>0, other coefficients = 0
       !!              linear eos function of T and S: rn_alpha and rn_beta<>0, other coefficients=0
       !!              Vallis like equation: use default values of coefficients
       !!
-      !! ** Action  :   compute rho , the in situ density (kg/m^3)
+      !! ** Action  :   compute rho , the in situ density anomaly (kg/m^3)
       !!
       !! References :   Roquet et al, Ocean Modelling (2015)
       !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
       !!                TEOS-10 Manual, 2010
       !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::   n
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m] 
-      REAL*4, DIMENSION(n), INTENT(out)            ::  rho     ! deviation of rho from 1000          [kg/m^3]                
+      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  rho     ! deviation of rho from 1000          [kg/m^3]
       !
       INTEGER  ::  i
-      REAL*8  :: zt, zh, ztm! local scalars
+      REAL*8  :: zt, zh ! local scalars
       REAL*8  :: zs! local scalars
       REAL*8  :: zn1, zn2!   -      -
       REAL*8  :: zn, zn0, zn3!   -      -
+      REAL*8  :: r0
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
+      REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
       !!----------------------------------------------------------------------
       !
       SELECT CASE( neos )
@@ -277,7 +298,6 @@ CONTAINS
             zt  = T(i) - 10.d0
             zs  = S(i) - 35.d0
             zh  = depth (i)
-            ztm = tmask(i)
             !
             zn =  - rn_a0 * ( 1.d0 + 0.5d0*rn_lambda1*zt + rn_mu1*zh ) * zt   &
                &  + rn_b0 * ( 1.d0 - 0.5d0*rn_lambda2*zs - rn_mu2*zh ) * zs   &
@@ -287,12 +307,49 @@ CONTAINS
             rho(i) = REAL(zn + rho0 - 1000.d0, KIND=4)
          END DO
          !
+      CASE(np_old_eos80)
+         DO i=1,n
+            zt = T(i)
+            zs = S(i)
+            zh = depth(i)                 ! depth
+            zsr= SQRT( ABS( zs) )        ! square root salinity
+            !
+            ! compute volumic mass pure water at atm pressure
+            zr1= ( ( ( ( 6.536332e-9*zt-1.120083e-6 )*zt+1.001685e-4 )*zt   &
+                 &                          -9.095290e-3 )*zt+6.793952e-2 )*zt+999.842594d0
+            ! seawater volumic mass atm pressure
+            zr2= ( ( ( 5.3875e-9*zt-8.2467e-7 ) *zt+7.6438e-5 ) *zt   &
+                 &                                         -4.0899e-3 ) *zt+0.824493d0
+            zr3= ( -1.6546e-6*zt+1.0227e-4 )    *zt-5.72466e-3
+            zr4= 4.8314e-4
+            !
+            ! potential volumic mass (reference to the surface)
+            zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
+            !
+            ! add the compression terms
+            ze = ( -3.508914e-8*zt-1.248266e-8 ) *zt-2.595994e-6
+            zbw= (  1.296821e-6*zt-5.782165e-9 ) *zt+1.045941e-4
+            zb = zbw + ze * zs
+            !
+            zd = -2.042967e-2
+            zc =   (-7.267926e-5*zt+2.598241e-3 ) *zt+0.1571896
+            zaw= ( ( 5.939910e-6*zt+2.512549e-3 ) *zt-0.1028859d0 ) *zt - 4.721788d0
+            za = ( zd*zsr + zc ) *zs + zaw
+            !
+            zb1=   (  -0.1909078d0  *zt+7.390729d0    ) *zt-55.87545d0
+            za1= ( (   2.326469e-3*zt+1.553190d0    ) *zt-65.00517d0 ) *zt + 1044.077d0
+            zkw= ( ( (-1.361629e-4*zt-1.852732e-2 ) *zt-30.41638d0 ) *zt + 2098.925d0 ) *zt+190925.6d0
+            zk0= ( zb1*zsr + za1 )*zs + zkw
+            !
+            ! masked in situ density anomaly
+            rho(i) = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0
+         END DO
       END SELECT
       !
     END SUBROUTINE eos_insitu4
 
 
-    SUBROUTINE eos_insitu_m4(t, s, depth, rho, n)
+    SUBROUTINE eos_insitu4_m(fillvalue, mask, T, S, depth, rho, n)
       !!----------------------------------------------------------------------
       !!                   ***  ROUTINE eos_insitu  ***
       !!
@@ -325,18 +382,23 @@ CONTAINS
       !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
       !!                TEOS-10 Manual, 2010
       !!----------------------------------------------------------------------
-      LOGICAL(KIND=1), INTENT(IN)                  :: mask(n)   !logical mask of land points
+      INTEGER*4, INTENT(IN)                        ::   n
+      LOGICAL(KIND=1), DIMENSION(n), INTENT(IN)    ::  mask   !logical mask of land points
       REAL*4, INTENT(IN)                           :: fillvalue
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m] 
-      REAL*4, DIMENSION(n), INTENT(out)            ::  rho     ! deviation of rho from 1000          [kg/m^3]                
+      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  rho     ! deviation of rho from 1000          [kg/m^3]
       !
       INTEGER  ::  i
-      REAL*8  :: zt, zh, ztm! local scalars
+      REAL*8  :: zt, zh ! local scalars
       REAL*8  :: zs! local scalars
       REAL*8  :: zn1, zn2!   -      -
       REAL*8  :: zn, zn0, zn3!   -      -
+      REAL*8  :: r0
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
+      REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
       !!----------------------------------------------------------------------
       !
       SELECT CASE( neos )
@@ -400,7 +462,6 @@ CONTAINS
             zt  = T(i) - 10.d0
             zs  = S(i) - 35.d0
             zh  = depth (i)
-            ztm = tmask(i)
             !
             zn =  - rn_a0 * ( 1.d0 + 0.5d0*rn_lambda1*zt + rn_mu1*zh ) * zt   &
                &  + rn_b0 * ( 1.d0 - 0.5d0*rn_lambda2*zs - rn_mu2*zh ) * zs   &
@@ -410,10 +471,52 @@ CONTAINS
             rho(i) = REAL(zn + rho0 - 1000.d0, KIND=4)
          END DO
          !
-      END SELECT
+      CASE(np_old_eos80)
+         DO i=1,n
+            IF (mask(i)) THEN
+               rho(i) = fillvalue
+               CYCLE
+            END IF
+
+            zt = T(i)
+            zs = S(i)
+            zh = depth(i)                 ! depth
+            zsr= SQRT( ABS( zs) )        ! square root salinity
+            !
+            ! compute volumic mass pure water at atm pressure
+            zr1= ( ( ( ( 6.536332e-9*zt-1.120083e-6 )*zt+1.001685e-4 )*zt   &
+                 &                          -9.095290e-3 )*zt+6.793952e-2 )*zt+999.842594d0
+            ! seawater volumic mass atm pressure
+            zr2= ( ( ( 5.3875e-9*zt-8.2467e-7 ) *zt+7.6438e-5 ) *zt   &
+                 &                                         -4.0899e-3 ) *zt+0.824493d0
+            zr3= ( -1.6546e-6*zt+1.0227e-4 )    *zt-5.72466e-3
+            zr4= 4.8314e-4
+            !
+            ! potential volumic mass (reference to the surface)
+            zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
+            !
+            ! add the compression terms
+            ze = ( -3.508914e-8*zt-1.248266e-8 ) *zt-2.595994e-6
+            zbw= (  1.296821e-6*zt-5.782165e-9 ) *zt+1.045941e-4
+            zb = zbw + ze * zs
+            !
+            zd = -2.042967e-2
+            zc =   (-7.267926e-5*zt+2.598241e-3 ) *zt+0.1571896
+            zaw= ( ( 5.939910e-6*zt+2.512549e-3 ) *zt-0.1028859d0 ) *zt - 4.721788d0
+            za = ( zd*zsr + zc ) *zs + zaw
+            !
+            zb1=   (  -0.1909078d0  *zt+7.390729d0    ) *zt-55.87545d0
+            za1= ( (   2.326469e-3*zt+1.553190d0    ) *zt-65.00517d0 ) *zt + 1044.077d0
+            zkw= ( ( (-1.361629e-4*zt-1.852732e-2 ) *zt-30.41638d0 ) *zt + 2098.925d0 ) *zt+190925.6d0
+            zk0= ( zb1*zsr + za1 )*zs + zkw
+            !
+            ! masked in situ density anomaly
+            rho(i) = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0
+         END DO
+       END SELECT
       !
     END SUBROUTINE eos_insitu4_m
-    
+
     SUBROUTINE eos_sigman4(T, S, depth_km, rho, n)
       !!----------------------------------------------------------------------
       !!                   ***  ROUTINE eos_insitu  ***
@@ -447,29 +550,32 @@ CONTAINS
       !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
       !!                TEOS-10 Manual, 2010
       !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::  n
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, INTENT(in)                           ::  depth_km! reference depth                    [km] 
-      REAL*4, DIMENSION(n), INTENT(out)            ::  rho     ! deviation of rho from 1000          [kg/m^3]                
+      REAL*4, INTENT(in)                           ::  depth_km! reference depth                    [km]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  rho     ! deviation of rho from 1000          [kg/m^3]
       !
       INTEGER  ::  i
-      REAL*8  :: zt, zh, ztm! local scalars
+      REAL*8  :: zt, zh ! local scalars
       REAL*8  :: zs! local scalars
       REAL*8  :: zn1, zn2!   -      -
       REAL*8  :: zn, zn0, zn3!   -      -
+      REAL*8  :: r0
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
+      REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
       !!----------------------------------------------------------------------
       !
-      zh = depth_km * 1.d3 * r1_Z0
-      !!----------------------------------------------------------------------
-      !
-      IF (neos == np_teos10) THEN
-         ! Add reference profile r0 to anomaly
-          r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-      END IF
       SELECT CASE( neos )
       !
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
+         zh = depth_km * 1.d3 * r1_Z0
+         IF (neos == np_teos10) THEN
+            ! Define reference profile r0 to be added to anomaly
+             r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+         END IF
          DO i=1,n
             !
             zt  = T (i) * r1_T0                           ! temperature
@@ -513,6 +619,7 @@ CONTAINS
          !
       CASE( np_seos )                !==  simplified EOS  ==!
          !
+         zh = depth_km * 1.d3
          DO i=1,n
             zt  = T(i) - 10.d0
             zs  = S(i) - 35.d0
@@ -525,13 +632,50 @@ CONTAINS
             rho(i) = REAL(zn + rho0 - 1000.d0, KIND=4)
          END DO
          !
+      CASE(np_old_eos80)
+          zh = depth_km*1000.d0                  ! depth
+          DO i=1,n
+             zt = T(i)
+             zs = S(i)
+             zsr= SQRT( ABS( zs) )        ! square root salinity
+             !
+             ! compute volumic mass pure water at atm pressure
+             zr1= ( ( ( ( 6.536332d-9*zt-1.120083d-6 )*zt+1.001685d-4 )*zt   &
+                  &                          -9.095290d-3 )*zt+6.793952d-2 )*zt+999.842594d0
+             ! seawater volumic mass atm pressure
+             zr2= ( ( ( 5.3875d-9*zt-8.2467d-7 ) *zt+7.6438d-5 ) *zt   &
+                  &                                         -4.0899d-3 ) *zt+0.824493d0
+             zr3= ( -1.6546d-6*zt+1.0227d-4 )    *zt-5.72466d-3
+             zr4= 4.8314d-4
+             !
+             ! potential volumic mass (reference to the surface)
+             zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
+             !
+             ! add the compression terms
+             ze = ( -3.508914d-8*zt-1.248266d-8 ) *zt-2.595994d-6
+             zbw= (  1.296821d-6*zt-5.782165d-9 ) *zt+1.045941d-4
+             zb = zbw + ze * zs
+             !
+             zd = -2.042967d-2
+             zc =   (-7.267926d-5*zt+2.598241d-3 ) *zt+0.1571896
+             zaw= ( ( 5.939910d-6*zt+2.512549d-3 ) *zt-0.1028859d0 ) *zt - 4.721788d0
+             za = ( zd*zsr + zc ) *zs + zaw
+             !
+             zb1=   (  -0.1909078d0  *zt+7.390729d0    ) *zt-55.87545d0
+             za1= ( (   2.326469d-3*zt+1.553190d0    ) *zt-65.00517d0 ) *zt + 1044.077d0
+             zkw= ( ( (-1.361629d-4*zt-1.852732d-2 ) *zt-30.41638d0 ) *zt + 2098.925d0 ) *zt+190925.6d0
+             zk0= ( zb1*zsr + za1 )*zs + zkw
+             !
+             ! unmasked in situ density anomaly
+             rho(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0, KIND=4)
+          end do
       END SELECT
       !
    END SUBROUTINE eos_sigman4
 
 
-   
-   SUBROUTINE eos_sigman4_m(fillvalue, mask, t, s, depth_km, rho, n)
+
+   SUBROUTINE eos_sigman4_m(fillvalue, mask, T, S, depth_km, rho, n)
       !!----------------------------------------------------------------------
       !!                   ***  ROUTINE eos_insitu  ***
       !!
@@ -565,34 +709,37 @@ CONTAINS
       !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
       !!                TEOS-10 Manual, 2010
       !!----------------------------------------------------------------------
-      LOGICAL(KIND=1), INTENT(IN)                  :: mask(n)   !logical mask of land points
+      INTEGER*4, INTENT(IN)                        ::   n
+      LOGICAL(KIND=1), DIMENSION(n), INTENT(IN)    :: mask   !logical mask of land points
       REAL*4, INTENT(IN)                           ::   fillvalue
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, DIMENSION(n), INTENT(in)             ::  depth_km! reference depth                    [km] 
-      REAL*4, DIMENSION(n), INTENT(out)            ::  rho     ! deviation of rho from 1000          [kg/m^3]                
+      REAL*4, INTENT(in)                           ::  depth_km!                    [km]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  rho     ! deviation of rho from 1000          [kg/m^3]
       !
       INTEGER  ::  i
-      REAL*8  :: zt, zh, ztm! local scalars
+      REAL*8  :: zt, zh! local scalars
       REAL*8  :: zs! local scalars
       REAL*8  :: zn1, zn2!   -      -
       REAL*8  :: zn, zn0, zn3!   -      -
+      REAL*8  :: r0
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
+      REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
       !!----------------------------------------------------------------------
       !
-      zh = depth_km * 1.d3 * r1_Z0
-      !!----------------------------------------------------------------------
-      !
-      IF (neos == np_teos10) THEN
-         ! Add reference profile r0 to anomaly
-          r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-      END IF
       SELECT CASE( neos )
       !
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
+         zh = depth_km * 1.d3 * r1_Z0
+         IF (neos == np_teos10) THEN
+            ! Define reference profile r0 to be added to anomaly
+              r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+         END IF
          DO i=1,n
             IF (mask(i)) THEN
-               sigma0(i) = fillvalue
+               rho(i) = fillvalue
                CYCLE
             END IF
             !
@@ -637,9 +784,10 @@ CONTAINS
          !
       CASE( np_seos )                !==  simplified EOS  ==!
          !
+         zh = depth_km * 1.d3
          DO i=1,n
             IF (mask(i)) THEN
-               sigma0(i) = fillvalue
+               rho(i) = fillvalue
                CYCLE
             END IF
             zt  = T(i) - 10.d0
@@ -653,10 +801,51 @@ CONTAINS
             rho(i) = REAL(zn + rho0 - 1000.d0, KIND=4)
          END DO
          !
+      CASE(np_old_eos80)
+         zh = depth_km*1000.d0                  ! depth
+         DO i=1,n
+            IF (mask(i)) THEN
+               rho(i) = fillvalue
+               CYCLE
+            END IF
+            zt = T(i)
+            zs = S(i)
+            zsr= SQRT( ABS( zs) )        ! square root salinity
+            !
+            ! compute volumic mass pure water at atm pressure
+            zr1= ( ( ( ( 6.536332d-9*zt-1.120083d-6 )*zt+1.001685d-4 )*zt   &
+                 &                          -9.095290d-3 )*zt+6.793952d-2 )*zt+999.842594d0
+            ! seawater volumic mass atm pressure
+            zr2= ( ( ( 5.3875d-9*zt-8.2467d-7 ) *zt+7.6438d-5 ) *zt   &
+                 &                                         -4.0899d-3 ) *zt+0.824493d0
+            zr3= ( -1.6546d-6*zt+1.0227d-4 )    *zt-5.72466d-3
+            zr4= 4.8314d-4
+            !
+            ! potential volumic mass (reference to the surface)
+            zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
+            !
+            ! add the compression terms
+            ze = ( -3.508914d-8*zt-1.248266d-8 ) *zt-2.595994d-6
+            zbw= (  1.296821d-6*zt-5.782165d-9 ) *zt+1.045941d-4
+            zb = zbw + ze * zs
+            !
+            zd = -2.042967d-2
+            zc =   (-7.267926d-5*zt+2.598241d-3 ) *zt+0.1571896
+            zaw= ( ( 5.939910d-6*zt+2.512549d-3 ) *zt-0.1028859d0 ) *zt - 4.721788d0
+            za = ( zd*zsr + zc ) *zs + zaw
+            !
+            zb1=   (  -0.1909078d0  *zt+7.390729d0    ) *zt-55.87545d0
+            za1= ( (   2.326469d-3*zt+1.553190d0    ) *zt-65.00517d0 ) *zt + 1044.077d0
+            zkw= ( ( (-1.361629d-4*zt-1.852732d-2 ) *zt-30.41638d0 ) *zt + 2098.925d0 ) *zt+190925.6d0
+            zk0= ( zb1*zsr + za1 )*zs + zkw
+            !
+            ! unmasked in situ density anomaly
+            rho(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0, KIND=4)
+          END DO
       END SELECT
       !
    END SUBROUTINE eos_sigman4_m
-   
+
    SUBROUTINE eos_sigma04(T, S, sigma0, n)
       !!----------------------------------------------------------------------
       !!                  ***  ROUTINE eos_insitu_pot  ***
@@ -672,17 +861,20 @@ CONTAINS
       !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
       !!                TEOS-10 Manual, 2010
       !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::   n
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m] 
-      REAL*4, DIMENSION(n), INTENT(out)            ::  sigma0     ! deviation of rho from 1000          [kg/m^3]                
+
+      REAL*4, DIMENSION(n), INTENT(out)            ::  sigma0     ! deviation of rho from 1000          [kg/m^3]
       !
       INTEGER  ::  i
 
-      REAL*8  :: zt, zh, zstemp, ztm! local scalars
+      REAL*8  :: zt, zh, zstemp ! local scalars
       REAL*8  :: zs! local scalars
       REAL*8  :: zn, zn0!   -      -
-        !!----------------------------------------------------------------------
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop  ! temporary scalars
+      !!----------------------------------------------------------------------
       SELECT CASE ( neos )
          !
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
@@ -714,6 +906,26 @@ CONTAINS
             !
          END DO
          !
+      CASE(np_old_eos80)
+         DO i=1,n
+             zt = T(i)
+             zs = S(i)
+             zsr= SQRT( ABS( zs) )        ! square root salinity
+             !
+             ! compute volumic mass pure water at atm pressure
+             zr1= ( ( ( ( 6.536332d-9*zt-1.120083d-6 )*zt+1.001685d-4 )*zt   &
+                  &                          -9.095290d-3 )*zt+6.793952d-2 )*zt+999.842594d0
+             ! seawater volumic mass atm pressure
+             zr2= ( ( ( 5.3875d-9*zt-8.2467d-7 ) *zt+7.6438d-5 ) *zt   &
+                  &                                         -4.0899d-3 ) *zt+0.824493d0
+             zr3= ( -1.6546d-6*zt+1.0227d-4 )    *zt-5.72466d-3
+             zr4= 4.8314d-4
+             !
+             ! potential volumic mass (reference to the surface)
+             zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
+             ! masked in situ density anomaly
+             sigma0(i) = zrhop - 1000.d0
+          END DO
       END SELECT
       !
    END SUBROUTINE eos_sigma04
@@ -734,18 +946,20 @@ CONTAINS
       !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
       !!                TEOS-10 Manual, 2010
       !!----------------------------------------------------------------------
-      LOGICAL(KIND=1), INTENT(IN)                  :: mask(n)   !logical mask of land points
-      REAL*4, INTENT(IN)                           ::   fillvalue
+      INTEGER*4, INTENT(IN)                        ::   n
+      LOGICAL(KIND=1), DIMENSION(n), INTENT(IN)    :: mask   !logical mask of land points
+      REAL*4, INTENT(IN)                           ::  fillvalue
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m] 
-      REAL*4, DIMENSION(n), INTENT(out)            ::  sigma0     ! deviation of rho from 1000          [kg/m^3]                
+      REAL*4, DIMENSION(n), INTENT(out)            ::  sigma0     ! deviation of rho from 1000          [kg/m^3]
       !
       INTEGER  ::  i
 
-      REAL*8  :: zt, zh, zstemp, ztm! local scalars
+      REAL*8  :: zt, zh, zstemp ! local scalars
       REAL*8  :: zs! local scalars
       REAL*8  :: zn, zn0!   -      -
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop  ! temporary scalars
         !!----------------------------------------------------------------------
       SELECT CASE ( neos )
          !
@@ -786,9 +1000,33 @@ CONTAINS
             !
          END DO
          !
+      CASE(np_old_eos80)
+         DO i=1,n
+             if (mask(i)) then
+                sigma0(i) = fillvalue
+                cycle
+             end if
+             zt = T(i)
+             zs = S(i)
+             zsr= SQRT( ABS( zs) )        ! square root salinity
+             !
+             ! compute volumic mass pure water at atm pressure
+             zr1= ( ( ( ( 6.536332d-9*zt-1.120083d-6 )*zt+1.001685d-4 )*zt   &
+                  &                          -9.095290d-3 )*zt+6.793952d-2 )*zt+999.842594d0
+             ! seawater volumic mass atm pressure
+             zr2= ( ( ( 5.3875d-9*zt-8.2467d-7 ) *zt+7.6438d-5 ) *zt   &
+                  &                                         -4.0899d-3 ) *zt+0.824493d0
+             zr3= ( -1.6546d-6*zt+1.0227d-4 )    *zt-5.72466d-3
+             zr4= 4.8314d-4
+             !
+             ! potential volumic mass (reference to the surface)
+             zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
+             ! masked in situ density anomaly
+             sigma0(i) = zrhop - 1000.d0
+          END DO
       END SELECT
       !
-   END SUBROUTINE eos_sigma04
+   END SUBROUTINE eos_sigma04_m
 
 
    SUBROUTINE eos_rab4( T, S, depth, alpha, beta, n )
@@ -801,16 +1039,19 @@ CONTAINS
       !!
       !! ** Action  : - outputs ajpha, beta     : thermal/haline expansion ratio at T-points
       !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::   n
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m] 
-      REAL*4, DIMENSION(n), INTENT(out)            ::  alpha   ! thermal expansion coefficent          [Celsius^{-1}]                
-      REAL*4, DIMENSION(n), INTENT(out)            ::  beta    ! saline contraction coefficent          [psu^{-1}/kg/g]                
+      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  alpha   ! thermal expansion coefficent          [Celsius^{-1}]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  beta    ! saline contraction coefficent          [psu^{-1}/kg/g]
       !
       INTEGER  ::  i
       !
       REAL*8 ::   zt , zh , zs         ! local scalars
       REAL*8 ::   zn , zn0, zn1, zn2, zn3   !   -      -
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zalbet  ! temporary scalar
       !!----------------------------------------------------------------------
       !
       SELECT CASE ( neos )
@@ -863,7 +1104,7 @@ CONTAINS
                !
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
             !
-            beta(i) =  REAL(zn / zs * r1_rho0 * ztm, KIND=4)
+            beta(i) =  REAL(zn / zs * r1_rho0, KIND=4)
             !
          END DO
          !
@@ -883,6 +1124,37 @@ CONTAINS
             !
          END DO
          !
+      CASE( np_old_eos80 )                  !==  simplified EOS  ==!
+         DO i=1,n
+            zt = T(i)
+            zs = S(i) - 35.d0
+            zh = depth(i)                 ! depth
+            zalbet = ( ( ( - 0.255019d-07 * zt + 0.298357d-05 ) * zt   &   ! ratio alpha/bdta
+                 &                                  - 0.203814d-03 ) * zt   &
+                 &                                  + 0.170907d-01 ) * zt   &
+                 &   +         0.665157d-01                                 &
+                 &   +     ( - 0.678662d-05 * zs                            &
+                 &           - 0.846960d-04 * zt + 0.378110d-02 ) * zs   &
+                 &   +   ( ( - 0.302285d-13 * zh                            &
+                 &           - 0.251520d-11 * zs                            &
+                 &           + 0.512857d-12 * zt * zt              ) * zh   &
+                 &           - 0.164759d-06 * zs                            &
+                 &        +(   0.791325d-08 * zt - 0.933746d-06 ) * zt   &
+                 &                                  + 0.380374d-04 ) * zh
+            !
+            beta(i) = ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
+                 &                               - 0.301985d-05 ) * zt      &
+                 &   +       0.785567d-03                                   &
+                 &   + (     0.515032d-08 * zs                              &
+                 &         + 0.788212d-08 * zt - 0.356603d-06 ) * zs     &
+                 &   + ( (   0.121551d-17 * zh                              &
+                 &         - 0.602281d-15 * zs                              &
+                 &         - 0.175379d-14 * zt + 0.176621d-12 ) * zh     &
+                 &                                + 0.408195d-10   * zs     &
+                 &     + ( - 0.213127d-11 * zt + 0.192867d-09 ) * zt     &
+                 &                                - 0.121555d-07 ) * zh
+            alpha(i) = zalbet*beta(i)
+         END DO
       END SELECT
       !
    END SUBROUTINE eos_rab4
@@ -898,16 +1170,21 @@ CONTAINS
       !!
       !! ** Action  : - outputs ajpha, beta     : thermal/haline expansion ratio at T-points
       !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::   n
+      LOGICAL(KIND=1), DIMENSION(n), INTENT(IN)    :: mask   !logical mask of land points
+      REAL*4, INTENT(IN)                       ::  fillvalue
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m] 
-      REAL*4, DIMENSION(n), INTENT(out)            ::  alpha   ! thermal expansion coefficent          [Celsius^{-1}]                
-      REAL*4, DIMENSION(n), INTENT(out)            ::  beta    ! saline contraction coefficent          [psu^{-1}/kg/g]                
+      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  alpha   ! thermal expansion coefficent          [Celsius^{-1}]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  beta    ! saline contraction coefficent          [psu^{-1}/kg/g]
       !
       INTEGER  ::  i
       !
       REAL*8 ::   zt , zh , zs         ! local scalars
       REAL*8 ::   zn , zn0, zn1, zn2, zn3   !   -      -
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zalbet  ! temporary scalar
       !!----------------------------------------------------------------------
       !
       SELECT CASE ( neos )
@@ -965,13 +1242,13 @@ CONTAINS
                !
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
             !
-            beta(i) =  REAL(zn / zs * r1_rho0 * ztm, KIND=4)
+            beta(i) =  REAL(zn / zs * r1_rho0, KIND=4)
             !
          END DO
          !
       CASE( np_seos )                  !==  simplified EOS  ==!
          !
-         do i=1,n
+         DO i=1,n
             IF (mask(i)) THEN
                alpha(i) = fillvalue
                beta(i) = fillvalue
@@ -987,14 +1264,51 @@ CONTAINS
             !
             zn  = rn_b0 * ( 1.d0 - rn_lambda2*zs - rn_mu2*zh ) - rn_nu*zt
             beta(i) = REAL(zn * r1_rho0, KIND=4)   ! beta
+         END DO
+         !
+      CASE( np_old_eos80 )                  !==  old EOS  ==!
+         !
+         DO i=1,n
+            IF (mask(i)) THEN
+               alpha(i) = fillvalue
+               beta(i) = fillvalue
+               CYCLE
+            END IF
+            zt = T(i)
+            zs = S(i) - 35.d0
+            zh = depth(i)                 ! depth
+            zalbet = ( ( ( - 0.255019d-07 * zt + 0.298357d-05 ) * zt   &   ! ratio alpha/bdta
+                 &                                  - 0.203814d-03 ) * zt   &
+                 &                                  + 0.170907d-01 ) * zt   &
+                 &   +         0.665157d-01                                 &
+                 &   +     ( - 0.678662d-05 * zs                            &
+                 &           - 0.846960d-04 * zt + 0.378110d-02 ) * zs   &
+                 &   +   ( ( - 0.302285d-13 * zh                            &
+                 &           - 0.251520d-11 * zs                            &
+                 &           + 0.512857d-12 * zt * zt              ) * zh   &
+                 &           - 0.164759d-06 * zs                            &
+                 &        +(   0.791325d-08 * zt - 0.933746d-06 ) * zt   &
+                 &                                  + 0.380374d-04 ) * zh
             !
+            beta(i) = ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
+                 &                               - 0.301985d-05 ) * zt      &
+                 &   +       0.785567d-03                                   &
+                 &   + (     0.515032d-08 * zs                              &
+                 &         + 0.788212d-08 * zt - 0.356603d-06 ) * zs     &
+                 &   + ( (   0.121551d-17 * zh                              &
+                 &         - 0.602281d-15 * zs                              &
+                 &         - 0.175379d-14 * zt + 0.176621d-12 ) * zh     &
+                 &                                + 0.408195d-10   * zs     &
+                 &     + ( - 0.213127d-11 * zt + 0.192867d-09 ) * zt     &
+                 &                                - 0.121555d-07 ) * zh
+            alpha(i) = zalbet*beta(i)
          END DO
          !
       END SELECT
       !
    END SUBROUTINE eos_rab4_m
 
-   SUBROUTINE eos_rab_ref_4( T, S, depth_km, alpha, beta, n )
+   SUBROUTINE eos_rab_ref4( T, S, depth_km, alpha, beta, n )
       !!----------------------------------------------------------------------
       !!                 ***  ROUTINE rab_3d  ***
       !!
@@ -1004,16 +1318,19 @@ CONTAINS
       !!
       !! ** Action  : - outputs ajpha, beta     : thermal/haline expansion ratio at T-points
       !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::   n
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, INTENT(in)                           ::  depth_km! reference depth                    [km] 
-      REAL*4, DIMENSION(n), INTENT(out)            ::  alpha   ! thermal expansion coefficent          [Celsius^{-1}]          
-      REAL*4, DIMENSION(n), INTENT(out)            ::  beta    ! saline contraction coefficent          [psu^{-1}/kg/g]                
+      REAL*4, INTENT(in)                           ::  depth_km! reference depth                    [km]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  alpha   ! thermal expansion coefficent          [Celsius^{-1}]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  beta    ! saline contraction coefficent          [psu^{-1}/kg/g]
       !
       INTEGER  ::  i
       !
       REAL*8 ::   zt , zh , zs         ! local scalars
       REAL*8 ::   zn , zn0, zn1, zn2, zn3   !   -      -
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zalbet  ! temporary scalar
       !!----------------------------------------------------------------------
       !
       SELECT CASE ( neos )
@@ -1066,7 +1383,7 @@ CONTAINS
                !
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
             !
-            beta(i) =  REAL(zn / zs * r1_rho0 * ztm, KIND=4)
+            beta(i) =  REAL(zn / zs * r1_rho0, KIND=4)
             !
          END DO
          !
@@ -1085,12 +1402,43 @@ CONTAINS
             !
          END DO
          !
+      CASE( np_old_eos80 )                  !==  simplified EOS  ==!
+         zh  = depth_km*1.d3
+         DO i=1,n
+            zt = T(i)
+            zs = S(i) - 35.d0
+            zalbet = ( ( ( - 0.255019d-07 * zt + 0.298357d-05 ) * zt   &   ! ratio alpha/bdta
+                 &                                  - 0.203814d-03 ) * zt   &
+                 &                                  + 0.170907d-01 ) * zt   &
+                 &   +         0.665157d-01                                 &
+                 &   +     ( - 0.678662d-05 * zs                            &
+                 &           - 0.846960d-04 * zt + 0.378110d-02 ) * zs   &
+                 &   +   ( ( - 0.302285d-13 * zh                            &
+                 &           - 0.251520d-11 * zs                            &
+                 &           + 0.512857d-12 * zt * zt              ) * zh   &
+                 &           - 0.164759d-06 * zs                            &
+                 &        +(   0.791325d-08 * zt - 0.933746d-06 ) * zt   &
+                 &                                  + 0.380374d-04 ) * zh
+            !
+            beta(i) = ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
+                 &                               - 0.301985d-05 ) * zt      &
+                 &   +       0.785567d-03                                   &
+                 &   + (     0.515032d-08 * zs                              &
+                 &         + 0.788212d-08 * zt - 0.356603d-06 ) * zs     &
+                 &   + ( (   0.121551d-17 * zh                              &
+                 &         - 0.602281d-15 * zs                              &
+                 &         - 0.175379d-14 * zt + 0.176621d-12 ) * zh     &
+                 &                                + 0.408195d-10   * zs     &
+                 &     + ( - 0.213127d-11 * zt + 0.192867d-09 ) * zt     &
+                 &                                - 0.121555d-07 ) * zh
+            alpha(i) = zalbet*beta(i)
+         END DO
       END SELECT
       !
-   END SUBROUTINE eos_rab_ref_4
+   END SUBROUTINE eos_rab_ref4
 
 
-   SUBROUTINE eos_rab4_m( fillvalue, mask, T, S, depth, alpha, beta, n )
+   SUBROUTINE eos_rab_ref4_m( fillvalue, mask, T, S, depth_km, alpha, beta, n )
       !!----------------------------------------------------------------------
       !!                 ***  ROUTINE rab_3d  ***
       !!
@@ -1100,21 +1448,27 @@ CONTAINS
       !!
       !! ** Action  : - outputs ajpha, beta     : thermal/haline expansion ratio at T-points
       !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::   n
+      LOGICAL(KIND=1), DIMENSION(n), INTENT(IN)    :: mask   !logical mask of land points
+      REAL*4, INTENT(IN)                           ::  fillvalue
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m] 
-      REAL*4, DIMENSION(n), INTENT(out)            ::  alpha   ! thermal expansion coefficent          [Celsius^{-1}]                
-      REAL*4, DIMENSION(n), INTENT(out)            ::  beta    ! saline contraction coefficent          [psu^{-1}/kg/g]                
+      REAL*4, INTENT(in)                           ::  depth_km! reference depth                    [km]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  alpha   ! thermal expansion coefficent          [Celsius^{-1}]
+      REAL*4, DIMENSION(n), INTENT(out)            ::  beta    ! saline contraction coefficent          [psu^{-1}/kg/g]
       !
       INTEGER  ::  i
       !
       REAL*8 ::   zt , zh , zs         ! local scalars
       REAL*8 ::   zn , zn0, zn1, zn2, zn3   !   -      -
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zalbet  ! temporary scalar
       !!----------------------------------------------------------------------
       !
       SELECT CASE ( neos )
       !
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
+         zh  = depth_km*1.d3 * r1_Z0                                ! depth
          !
          DO i=1,n
             IF (mask(i)) THEN
@@ -1123,7 +1477,6 @@ CONTAINS
                CYCLE
             END IF
             !
-            zh  = depth (i) * r1_Z0                                ! depth
             zt  = T (i) * r1_T0                           ! temperature
             zs  = SQRT( ABS( S(i) + rdeltaS ) * r1_S0 )   ! square root salinity
             !
@@ -1167,12 +1520,13 @@ CONTAINS
                !
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
             !
-            beta(i) =  REAL(zn / zs * r1_rho0 * ztm, KIND=4)
+            beta(i) =  REAL(zn / zs * r1_rho0, KIND=4)
             !
          END DO
          !
       CASE( np_seos )                  !==  simplified EOS  ==!
          !
+         zh  = depth_km*1.d3                                ! depth
          do i=1,n
             IF (mask(i)) THEN
                alpha(i) = fillvalue
@@ -1181,7 +1535,6 @@ CONTAINS
             END IF
             zt  = T (i) - 10.d0   ! pot. temperature anomaly (t-T0)
             zs  = S (i) - 35.d0   ! abs. salinity anomaly (s-S0)
-            zh  = depth(i)                ! depth in meters at t-point
 
             !
             zn  = rn_a0 * ( 1.d0 + rn_lambda1*zt + rn_mu1*zh ) + rn_nu*zs
@@ -1192,52 +1545,84 @@ CONTAINS
             !
          END DO
          !
+      CASE( np_old_eos80 )                  !==  simplified EOS  ==!
+         zh  = depth_km*1.d3
+         DO i=1,n
+            zt = T(i)
+            zs = S(i) - 35.d0
+            zalbet = ( ( ( - 0.255019d-07 * zt + 0.298357d-05 ) * zt   &   ! ratio alpha/bdta
+                 &                                  - 0.203814d-03 ) * zt   &
+                 &                                  + 0.170907d-01 ) * zt   &
+                 &   +         0.665157d-01                                 &
+                 &   +     ( - 0.678662d-05 * zs                            &
+                 &           - 0.846960d-04 * zt + 0.378110d-02 ) * zs   &
+                 &   +   ( ( - 0.302285d-13 * zh                            &
+                 &           - 0.251520d-11 * zs                            &
+                 &           + 0.512857d-12 * zt * zt              ) * zh   &
+                 &           - 0.164759d-06 * zs                            &
+                 &        +(   0.791325d-08 * zt - 0.933746d-06 ) * zt   &
+                 &                                  + 0.380374d-04 ) * zh
+            !
+            beta(i) = ( ( -0.415613d-09 * zt + 0.555579d-07 ) * zt    &   ! beta
+                 &                               - 0.301985d-05 ) * zt      &
+                 &   +       0.785567d-03                                   &
+                 &   + (     0.515032d-08 * zs                              &
+                 &         + 0.788212d-08 * zt - 0.356603d-06 ) * zs     &
+                 &   + ( (   0.121551d-17 * zh                              &
+                 &         - 0.602281d-15 * zs                              &
+                 &         - 0.175379d-14 * zt + 0.176621d-12 ) * zh     &
+                 &                                + 0.408195d-10   * zs     &
+                 &     + ( - 0.213127d-11 * zt + 0.192867d-09 ) * zt     &
+                 &                                - 0.121555d-07 ) * zh
+            alpha(i) = zalbet*beta(i)
+         END DO
       END SELECT
       !
-   END SUBROUTINE eos_rab4_m
-   ! SUBROUTINE bn2_t( pts, pab, ktab, pn2, ktn2, Kmm )
-   !    !!----------------------------------------------------------------------
-   !    !!                  ***  ROUTINE bn2  ***
-   !    !!
-   !    !! ** Purpose :   Compute the local Brunt-Vaisala frequency at the
-   !    !!                time-step of the input arguments
-   !    !!
-   !    !! ** Method  :   pn2 = grav * (alpha dk[T] + beta dk[S] ) / e3w
-   !    !!      where alpha and beta are given in pab, and computed on T-points.
-   !    !!      N.B. N^2 is set one for all to zero at jk=1 in istate module.
-   !    !!
-   !    !! ** Action  :   pn2 : square of the brunt-vaisala frequency at w-point
-   !    !!
-   !    !!----------------------------------------------------------------------
-   !    INTEGER                                , INTENT(in   ) ::  Kmm   ! time level index
-   !    INTEGER                                , INTENT(in   ) ::  ktab, ktn2
-   !    REAL*8, DIMENSION(jpi,jpj,  jpk,jpts), INTENT(in   ) ::  pts   ! pot. temperature and salinity   [Celsius,psu]
-   !    REAL*8, DIMENSION(A2D_T(ktab),JPK,JPTS), INTENT(in   ) ::  pab   ! thermal/haline expansion coef.  [Celsius-1,psu-1]
-   !    REAL*8, DIMENSION(A2D_T(ktn2),JPK     ), INTENT(  out) ::  pn2   ! Brunt-Vaisala frequency squared [1/s^2]
-   !    !
-   !    INTEGER  ::   ji, jj, jk      ! dummy loop indices
-   !    REAL*8 ::   zaw, zbw, zrw   ! local scalars
-   !    !!----------------------------------------------------------------------
-   !    !
-   !    IF( ln_timing )   CALL timing_start('bn2')
-   !    !
-   !    DO_3D( nn_hls, nn_hls, nn_hls, nn_hls, 2, jpkm1 )      ! interior points only (2=< jk =< jpkm1 ); surface and bottom value set to zero one for all in istate.F90
-   !       zrw =   ( gdepw(i  ,Kmm) - gdept(i,Kmm) )   &
-   !          &  / ( gdept(i-1,Kmm) - gdept(i,Kmm) )
-   !          !
-   !       zaw = pab(i,jp_tem) * (1. - zrw) + pab(i-1,jp_tem) * zrw
-   !       zbw = pab(i,jp_sal) * (1. - zrw) + pab(i-1,jp_sal) * zrw
-   !       !
-   !       pn2(i) = grav * (  zaw * ( pts(i-1,jp_tem) - pts(i,jp_tem) )     &
-   !          &                    - zbw * ( pts(i-1,jp_sal) - pts(i,jp_sal) )  )  &
-   !          &            / e3w(i,Kmm) * wmask(i)
-   !    END_3D
-   !    !
-   !    IF(sn_cfctl%l_prtctl)   CALL prt_ctl( tab3d_1=CASTDP(pn2), clinfo1=' bn2  : ' )
-   !    !
-   !    IF( ln_timing )   CALL timing_stop('bn2')
-   !    !
-   ! END SUBROUTINE bn2_t
+    END SUBROUTINE eos_rab_ref4_m
+
+!    ! SUBROUTINE bn2_t( pts, pab, ktab, pn2, ktn2, Kmm )
+!    !    !!----------------------------------------------------------------------
+!    !    !!                  ***  ROUTINE bn2  ***
+!    !    !!
+!    !    !! ** Purpose :   Compute the local Brunt-Vaisala frequency at the
+!    !    !!                time-step of the input arguments
+!    !    !!
+!    !    !! ** Method  :   pn2 = grav * (alpha dk[T] + beta dk[S] ) / e3w
+!    !    !!      where alpha and beta are given in pab, and computed on T-points.
+!    !    !!      N.B. N^2 is set one for all to zero at jk=1 in istate module.
+!    !    !!
+!    !    !! ** Action  :   pn2 : square of the brunt-vaisala frequency at w-point
+!    !    !!
+!    !    !!----------------------------------------------------------------------
+!    !    INTEGER                                , INTENT(in   ) ::  Kmm   ! time level index
+!    !    INTEGER                                , INTENT(in   ) ::  ktab, ktn2
+!    !    REAL*8, DIMENSION(jpi,jpj,  jpk,jpts), INTENT(in   ) ::  pts   ! pot. temperature and salinity   [Celsius,psu]
+!    !    REAL*8, DIMENSION(A2D_T(ktab),JPK,JPTS), INTENT(in   ) ::  pab   ! thermal/haline expansion coef.  [Celsius-1,psu-1]
+!    !    REAL*8, DIMENSION(A2D_T(ktn2),JPK     ), INTENT(  out) ::  pn2   ! Brunt-Vaisala frequency squared [1/s^2]
+!    !    !
+!    !    INTEGER  ::   ji, jj, jk      ! dummy loop indices
+!    !    REAL*8 ::   zaw, zbw, zrw   ! local scalars
+!    !    !!----------------------------------------------------------------------
+!    !    !
+!    !    IF( ln_timing )   CALL timing_start('bn2')
+!    !    !
+!    !    DO_3D( nn_hls, nn_hls, nn_hls, nn_hls, 2, jpkm1 )      ! interior points only (2=< jk =< jpkm1 ); surface and bottom value set to zero one for all in istate.F90
+!    !       zrw =   ( gdepw(i  ,Kmm) - gdept(i,Kmm) )   &
+!    !          &  / ( gdept(i-1,Kmm) - gdept(i,Kmm) )
+!    !          !
+!    !       zaw = pab(i,jp_tem) * (1. - zrw) + pab(i-1,jp_tem) * zrw
+!    !       zbw = pab(i,jp_sal) * (1. - zrw) + pab(i-1,jp_sal) * zrw
+!    !       !
+!    !       pn2(i) = grav * (  zaw * ( pts(i-1,jp_tem) - pts(i,jp_tem) )     &
+!    !          &                    - zbw * ( pts(i-1,jp_sal) - pts(i,jp_sal) )  )  &
+!    !          &            / e3w(i,Kmm) * wmask(i)
+!    !    END_3D
+!    !    !
+!    !    IF(sn_cfctl%l_prtctl)   CALL prt_ctl( tab3d_1=CASTDP(pn2), clinfo1=' bn2  : ' )
+!    !    !
+!    !    IF( ln_timing )   CALL timing_stop('bn2')
+!    !    !
+!    ! END SUBROUTINE bn2_t
 
 
    SUBROUTINE eos_pot_from_CT_SA4( CT, SA, pot, n )
@@ -1252,6 +1637,7 @@ CONTAINS
       !! Reference  :   TEOS-10, UNESCO
       !!                Rational approximation to TEOS10 algorithm (rms error on WOA13 values: 4.0d-5 degC)
       !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::   n
       REAL*4, DIMENSION(n), INTENT(in)             ::  CT       ! conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  SA       ! absolute salinity        [psu/g/kg]
       REAL*4, DIMENSION(n), INTENT(out)            ::  pot     ! potential temperature [Celsius]
@@ -1288,7 +1674,7 @@ CONTAINS
             !
       END DO
       !
-   END FUNCTION eos_pot_from_CT_SA4
+   END SUBROUTINE eos_pot_from_CT_SA4
 
 
   !  SUBROUTINE  eos_fzp_2d_t( psal, ptf, kttf, pdep )
@@ -1388,7 +1774,7 @@ CONTAINS
   !  END SUBROUTINE eos_fzp_0d
 
 
-   SUBROUTINE eos_pen4( T, S, depth, alpha_pe, beta_pe, ppen )
+   SUBROUTINE eos_pen4( T, S, depth, alpha_pe, beta_pe, ppen, n )
       !!----------------------------------------------------------------------
       !!                 ***  ROUTINE eos_pen  ***
       !!
@@ -1408,9 +1794,10 @@ CONTAINS
       !!                    pab_pe(:,:,:,jp_tem) is alpha_pe
       !!                    pab_pe(:,:,:,jp_sal) is beta_pe
       !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::   n
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
-      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                [m] 
+      REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                [m]
       REAL*4, DIMENSION(n), INTENT(  out)        ::  alpha_pe
       REAL*4, DIMENSION(n), INTENT(  out)        ::  beta_pe
       REAL*4, DIMENSION(n), INTENT(  out)        ::  ppen     ! potential energy anomaly
@@ -1446,7 +1833,7 @@ CONTAINS
                !
             zn  = ( zn2 * zh + zn1 ) * zh + zn0
             !
-            ppen(i)  = zn * zh * r1_rho0 * ztm
+            ppen(i)  = zn * zh * r1_rho0
             !
             ! alphaPE non-linear anomaly
             zn2 = APE002
@@ -1461,7 +1848,7 @@ CONTAINS
                !
             zn  = ( zn2 * zh + zn1 ) * zh + zn0
             !
-            alpha_pe(i) = zn * zh * r1_rho0 * ztm
+            alpha_pe(i) = zn * zh * r1_rho0
             !
             ! betaPE non-linear anomaly
             zn2 = BPE002
@@ -1476,7 +1863,7 @@ CONTAINS
                !
             zn  = ( zn2 * zh + zn1 ) * zh + zn0
             !
-            beta(i) = zn / zs * zh * r1_rho0
+            beta_pe(i) = zn / zs * zh * r1_rho0
             !
          END DO
          !
@@ -1491,16 +1878,378 @@ CONTAINS
             !                                    ! Potential Energy
             ppen(i) = ( rn_a0 * rn_mu1 * zt + rn_b0 * rn_mu2 * zs ) * zn
             !                                    ! alphaPE
-            pab_pe(i,jp_tem) = - rn_a0 * rn_mu1 * zn
-            pab_pe(i,jp_sal) =   rn_b0 * rn_mu2 * zn
+            alpha_pe(i) = - rn_a0 * rn_mu1 * zn
+            beta_pe(i) =   rn_b0 * rn_mu2 * zn
             !
-         END_3D
+         END DO
          !
       END SELECT
    END SUBROUTINE eos_pen4
 
+   SUBROUTINE eos_insitu04(T0, S0, depth_km, depth, drho0, n)
+      !!----------------------------------------------------------------------
+      !!                   ***  ROUTINE eos_insitu04  ***
+      !!
+      !! ** Purpose :   Compute the unmasked difference in density between the in-situ density
+      !!                  rho(T0,S0,z) and the reference density rho(T0, S0, 1.e3*depth_km).
+      !!
+      !! ** Method  :   drho(T0,S,z) = rho(T0,S0,z) - rho(T0, S0, 1.e3*depth_km)
+      !!                t      TEOS10: CT or EOS80: PT      Celsius
+      !!                s      TEOS10: SA or EOS80: SP      TEOS10: g/kg or EOS80: psu
+      !!                z      depth                        meters
+      !!                drho    in situ density anomaly      kg/m^3
+      !!
+      !!     ln_teos10 : polynomial TEOS-10 equation of state is used for rho(t,s,z).
+      !!               Note global mean r0(z)
+      !!         Check value: rho = 28.21993233072 kg/m^3 for z=3000 dbar, ct=3 Celsius, sa=35.5 g/kg
+      !!
+      !!     ln_eos80 : polynomial EOS-80 equation of state is used for rho(t,s,z).
+      !!         Check value: rho = 28.35011066567 kg/m^3 for z=3000 dbar, pt=3 Celsius, sp=35.5 psu
+      !!
+      !!     ln_seos : simplified equation of state
+      !!              rho(t,s,z) = rho0 -a0*(1+lambda/2*(T-T0)+mu*z+nu*(S-S0))*(T-T0) + b0*(S-S0) - 1000.
+      !!              linear case function of T only: rn_alpha<>0, other coefficients = 0
+      !!              linear eos function of T and S: rn_alpha and rn_beta<>0, other coefficients=0
+      !!              Vallis like equation: use default values of coefficients
+      !!
+      !! ** Action  :   compute rho , the in situ density anomaly (kg/m^3)
+      !!
+      !! References :   Roquet et al, Ocean Modelling (2015)
+      !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
+      !!                TEOS-10 Manual, 2010
+      !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::   n
+      REAL*4, INTENT(in)                       ::  T0       ! potential/conservative temperature  [Celsius]
+      REAL*4, INTENT(in)                       ::  S0       ! practical/absolute salinity        [psu/g/kg]
+      REAL*4, DIMENSION(n), INTENT(in)         ::  depth    ! depth                                 [m]
+      REAL*4, INTENT (IN)                      ::  depth_km ! reference depth
+      REAL*4, DIMENSION(n), INTENT(out)        ::  drho0    ! deviation of rho0 from value at reference depth  [kg/m^3]
+      !
+      INTEGER  ::  i
+      REAL*8  :: zt, zh ! local scalars
+      REAL*8  :: zs! local scalars
+      REAL*8  :: zn1, zn2!   -      -
+      REAL*8  :: zn, zn0, zn3!   -      -
+      REAL*8  :: rho00
+      REAL*8  :: r0
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
+      REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
+      !!----------------------------------------------------------------------
+      !
+      SELECT CASE( neos )
+      !
+      CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
+         !
+         zt  = T0 * r1_T0                           ! temperature
+         zs  = SQRT( ABS( S0 + rdeltaS ) * r1_S0 )   ! square root salinity
+         !
+         zn3 = EOS013*zt   &
+            &   + EOS103*zs+EOS003
+            !
+         zn2 = (EOS022*zt   &
+            &   + EOS112*zs+EOS012)*zt   &
+            &   + (EOS202*zs+EOS102)*zs+EOS002
+            !
+         zn1 = (((EOS041*zt   &
+            &   + EOS131*zs+EOS031)*zt   &
+            &   + (EOS221*zs+EOS121)*zs+EOS021)*zt   &
+            &   + ((EOS311*zs+EOS211)*zs+EOS111)*zs+EOS011)*zt   &
+            &   + (((EOS401*zs+EOS301)*zs+EOS201)*zs+EOS101)*zs+EOS001
+            !
+         zn0 = (((((EOS060*zt   &
+            &   + EOS150*zs+EOS050)*zt   &
+            &   + (EOS240*zs+EOS140)*zs+EOS040)*zt   &
+            &   + ((EOS330*zs+EOS230)*zs+EOS130)*zs+EOS030)*zt   &
+            &   + (((EOS420*zs+EOS320)*zs+EOS220)*zs+EOS120)*zs+EOS020)*zt   &
+            &   + ((((EOS510*zs+EOS410)*zs+EOS310)*zs+EOS210)*zs+EOS110)*zs+EOS010)*zt   &
+            &   + (((((EOS600*zs+EOS500)*zs+EOS400)*zs+EOS300)*zs+EOS200)*zs+EOS100)*zs+EOS000
+            !
+         IF (depth_km < 1.e-4) THEN
+            rho00 = zn0 - 1000.d0
+         ELSE
+            zh  = depth_km * 1.d3 * r1_Z0 
+            zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
+            IF (neos == np_teos10) THEN
+            !!  Add reference profile r0 to anomaly
+               r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+               rho00 = zn - 1000.d0 + r0
+            ELSE
+               rho00 = zn - 1000.d0
+            END IF
+         END IF
+         DO i=1,n
+            !
+            zh  = depth(i) * r1_Z0                                  ! depth
+            zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
+    !!----------------------------------------------------------------------
+            !!  Subtract 1000. to give density anomaly
+            IF (neos == np_teos10) THEN
+            !!  Add reference profile r0 to anomaly
+               r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+               drho0(i) = REAL(zn - 1000.d0 + r0 - rho00, KIND=4)
+            ELSE
+               drho0(i) = REAL(zn - 1000.d0 - rho00, KIND=4)
+            END IF
+    !!----------------------------------------------------------------------
+         END DO
 
-   SUBROUTINE eos_init(neos)
+      CASE( np_seos )                !==  simplified EOS  ==!
+         !
+         zt  = T0
+         zs  = S0
+         zh  = 1.d3*depth_km
+         zn =  - rn_a0 * ( 1.d0 + 0.5d0*rn_lambda1*zt + rn_mu1*zh ) * zt   &
+            &  + rn_b0 * ( 1.d0 - 0.5d0*rn_lambda2*zs - rn_mu2*zh ) * zs   &
+            &  - rn_nu * zt * zs
+            !
+         rho00 = zn - 1000.d0
+         !
+         DO i=1,n
+            zh = depth(i)
+            zn =  - rn_a0 * ( 1.d0 + 0.5d0*rn_lambda1*zt + rn_mu1*zh ) * zt   &
+               &  + rn_b0 * ( 1.d0 - 0.5d0*rn_lambda2*zs - rn_mu2*zh ) * zs   &
+               &  - rn_nu * zt * zs
+               !
+            ! prd(i) = zn * r1_rho0 * ztm                ! density anomaly (masked)
+            drho0(i) = REAL(zn + rho0 - 1000.d0, KIND=4)
+          END DO
+         !
+      CASE(np_old_eos80)
+         zt = T0
+         zs = S0
+         zsr= SQRT( ABS( zs) )        ! square root salinity
+         !
+         ! compute volumic mass pure water at atm pressure
+         zr1= ( ( ( ( 6.536332e-9*zt-1.120083e-6 )*zt+1.001685e-4 )*zt   &
+              &                          -9.095290e-3 )*zt+6.793952e-2 )*zt+999.842594d0
+         ! seawater volumic mass atm pressure
+         zr2= ( ( ( 5.3875e-9*zt-8.2467e-7 ) *zt+7.6438e-5 ) *zt   &
+              &                                         -4.0899e-3 ) *zt+0.824493d0
+         zr3= ( -1.6546e-6*zt+1.0227e-4 )    *zt-5.72466e-3
+         zr4= 4.8314e-4
+         !
+         ! potential volumic mass (reference to the surface)
+         zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
+         !
+         ! add the compression terms
+         ze = ( -3.508914e-8*zt-1.248266e-8 ) *zt-2.595994e-6
+         zbw= (  1.296821e-6*zt-5.782165e-9 ) *zt+1.045941e-4
+         zb = zbw + ze * zs
+         !
+         zd = -2.042967e-2
+         zc =   (-7.267926e-5*zt+2.598241e-3 ) *zt+0.1571896
+         zaw= ( ( 5.939910e-6*zt+2.512549e-3 ) *zt-0.1028859d0 ) *zt - 4.721788d0
+         za = ( zd*zsr + zc ) *zs + zaw
+         !
+         zb1=   (  -0.1909078d0  *zt+7.390729d0    ) *zt-55.87545d0
+         za1= ( (   2.326469e-3*zt+1.553190d0    ) *zt-65.00517d0 ) *zt + 1044.077d0
+         zkw= ( ( (-1.361629e-4*zt-1.852732e-2 ) *zt-30.41638d0 ) *zt + 2098.925d0 ) *zt+190925.6d0
+         zk0= ( zb1*zsr + za1 )*zs + zkw
+
+         zh = 1000.d0*depth_km
+         rho00 = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  )
+
+         DO i=1,n
+            zh = depth(i)
+            ! unmasked in situ density anomaly
+            drho0(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - rho00, KIND=4)
+            END DO
+      END SELECT
+      !
+   END SUBROUTINE eos_insitu04
+
+   SUBROUTINE eos_insitu04_m(fillvalue, mask, T0, S0, depth_km, depth, drho0, n)
+      !!----------------------------------------------------------------------
+      !!                   ***  ROUTINE eos_insitu04  ***
+      !!
+      !! ** Purpose :   Compute the masked difference in density between the in-situ density
+      !!                  rho(T0,S0,z) and the reference density rho(T0, S0, 1.e3*depth_km).
+      !!
+      !! ** Method  :   drho(T0,S,z) = rho(T0,S0,z) - rho(T0, S0, 1.e3*depth_km)
+      !!                t      TEOS10: CT or EOS80: PT      Celsius
+      !!                s      TEOS10: SA or EOS80: SP      TEOS10: g/kg or EOS80: psu
+      !!                z      depth                        meters
+      !!                drho    in situ density anomaly      kg/m^3
+      !!
+      !!     ln_teos10 : polynomial TEOS-10 equation of state is used for rho(t,s,z).
+      !!               Note global mean r0(z)
+      !!         Check value: rho = 28.21993233072 kg/m^3 for z=3000 dbar, ct=3 Celsius, sa=35.5 g/kg
+      !!
+      !!     ln_eos80 : polynomial EOS-80 equation of state is used for rho(t,s,z).
+      !!         Check value: rho = 28.35011066567 kg/m^3 for z=3000 dbar, pt=3 Celsius, sp=35.5 psu
+      !!
+      !!     ln_seos : simplified equation of state
+      !!              rho(t,s,z) = rho0 -a0*(1+lambda/2*(T-T0)+mu*z+nu*(S-S0))*(T-T0) + b0*(S-S0) - 1000.
+      !!              linear case function of T only: rn_alpha<>0, other coefficients = 0
+      !!              linear eos function of T and S: rn_alpha and rn_beta<>0, other coefficients=0
+      !!              Vallis like equation: use default values of coefficients
+      !!
+      !! ** Action  :   compute rho , the in situ density anomaly (kg/m^3)
+      !!
+      !! References :   Roquet et al, Ocean Modelling (2015)
+      !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
+      !!                TEOS-10 Manual, 2010
+      !!----------------------------------------------------------------------
+      INTEGER*4, INTENT(IN)                        ::   n
+      LOGICAL(KIND=1), DIMENSION(n), INTENT(IN)    ::  mask   !logical mask of land points
+      REAL*4, INTENT(IN)                       ::  fillvalue
+      REAL*4, INTENT(in)                       ::  T0       ! potential/conservative temperature  [Celsius]
+      REAL*4, INTENT(in)                       ::  S0       ! practical/absolute salinity        [psu/g/kg]
+      REAL*4, DIMENSION(n), INTENT(in)         ::  depth    ! depth                                 [m]
+      REAL*4, INTENT (IN)                      ::  depth_km ! reference depth
+      REAL*4, DIMENSION(n), INTENT(out)        ::  drho0    ! deviation of rho0 from value at reference depth  [kg/m^3]
+      !
+      INTEGER  ::  i
+      REAL*8  :: zt, zh ! local scalars
+      REAL*8  :: zs! local scalars
+      REAL*8  :: zn1, zn2!   -      -
+      REAL*8  :: zn, zn0, zn3!   -      -
+      REAL*8  :: rho00
+      REAL*8  :: r0
+      ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
+      REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
+      REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
+      !!----------------------------------------------------------------------
+      !
+      SELECT CASE( neos )
+      !
+      CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
+         !
+         zt  = T0 * r1_T0                           ! temperature
+         zs  = SQRT( ABS( S0 + rdeltaS ) * r1_S0 )   ! square root salinity
+         !
+         zn3 = EOS013*zt   &
+            &   + EOS103*zs+EOS003
+            !
+         zn2 = (EOS022*zt   &
+            &   + EOS112*zs+EOS012)*zt   &
+            &   + (EOS202*zs+EOS102)*zs+EOS002
+            !
+         zn1 = (((EOS041*zt   &
+            &   + EOS131*zs+EOS031)*zt   &
+            &   + (EOS221*zs+EOS121)*zs+EOS021)*zt   &
+            &   + ((EOS311*zs+EOS211)*zs+EOS111)*zs+EOS011)*zt   &
+            &   + (((EOS401*zs+EOS301)*zs+EOS201)*zs+EOS101)*zs+EOS001
+            !
+         zn0 = (((((EOS060*zt   &
+            &   + EOS150*zs+EOS050)*zt   &
+            &   + (EOS240*zs+EOS140)*zs+EOS040)*zt   &
+            &   + ((EOS330*zs+EOS230)*zs+EOS130)*zs+EOS030)*zt   &
+            &   + (((EOS420*zs+EOS320)*zs+EOS220)*zs+EOS120)*zs+EOS020)*zt   &
+            &   + ((((EOS510*zs+EOS410)*zs+EOS310)*zs+EOS210)*zs+EOS110)*zs+EOS010)*zt   &
+            &   + (((((EOS600*zs+EOS500)*zs+EOS400)*zs+EOS300)*zs+EOS200)*zs+EOS100)*zs+EOS000
+         
+         IF (depth_km < 1.e-4) THEN
+            rho00 = zn0 - 1000.d0
+         ELSE
+            zh  = depth_km * 1.d3 * r1_Z0 
+            zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
+            IF (neos == np_teos10) THEN
+            !!  Add reference profile r0 to anomaly
+               r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+               rho00 = zn - 1000.d0 + r0
+            ELSE
+               rho00 = zn - 1000.d0
+            END IF
+         END IF
+         DO i=1,n
+            IF (mask(i)) THEN
+               drho0(i) = fillvalue
+               CYCLE
+            END IF
+            !
+            zh  = depth(i) * r1_Z0                                  ! depth
+            zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
+    !!----------------------------------------------------------------------
+            !!  Subtract 1000. to give density anomaly
+            IF (neos == np_teos10) THEN
+            !!  Add reference profile r0 to anomaly
+               r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+               drho0(i) = REAL(zn - 1000.d0 + r0 - rho00, KIND=4)
+            ELSE
+               drho0(i) = REAL(zn - 1000.d0 - rho00, KIND=4)
+            END IF
+    !!----------------------------------------------------------------------
+            !
+            ! prd(i) = (  zn * r1_rho0 - 1.d0  ) * ztm  ! density anomaly (masked)
+            !
+         END DO
+         !
+      CASE( np_seos )                !==  simplified EOS  ==!
+         !
+         zt  = T0
+         zs  = S0
+         zh  = 1.d3*depth_km
+         zn =  - rn_a0 * ( 1.d0 + 0.5d0*rn_lambda1*zt + rn_mu1*zh ) * zt   &
+            &  + rn_b0 * ( 1.d0 - 0.5d0*rn_lambda2*zs - rn_mu2*zh ) * zs   &
+            &  - rn_nu * zt * zs
+            !
+         rho00 = zn - 1000.d0
+         !
+         DO i=1,n
+            IF (mask(i)) THEN
+               drho0(i) = fillvalue
+               CYCLE
+            END IF
+            zh = depth(i)
+            zn =  - rn_a0 * ( 1.d0 + 0.5d0*rn_lambda1*zt + rn_mu1*zh ) * zt   &
+               &  + rn_b0 * ( 1.d0 - 0.5d0*rn_lambda2*zs - rn_mu2*zh ) * zs   &
+               &  - rn_nu * zt * zs
+               !
+            ! prd(i) = zn * r1_rho0 * ztm                ! density anomaly (masked)
+            drho0(i) = REAL(zn + rho0 - 1000.d0, KIND=4)
+         END DO
+         !
+      CASE(np_old_eos80)
+         zt = T0
+         zs = S0
+         zsr= SQRT( ABS( zs) )        ! square root salinity
+         !
+         ! compute volumic mass pure water at atm pressure
+         zr1= ( ( ( ( 6.536332e-9*zt-1.120083e-6 )*zt+1.001685e-4 )*zt   &
+              &                          -9.095290e-3 )*zt+6.793952e-2 )*zt+999.842594d0
+         ! seawater volumic mass atm pressure
+         zr2= ( ( ( 5.3875e-9*zt-8.2467e-7 ) *zt+7.6438e-5 ) *zt   &
+              &                                         -4.0899e-3 ) *zt+0.824493d0
+         zr3= ( -1.6546e-6*zt+1.0227e-4 )    *zt-5.72466e-3
+         zr4= 4.8314e-4
+         !
+         ! potential volumic mass (reference to the surface)
+         zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
+         !
+         ! add the compression terms
+         ze = ( -3.508914e-8*zt-1.248266e-8 ) *zt-2.595994e-6
+         zbw= (  1.296821e-6*zt-5.782165e-9 ) *zt+1.045941e-4
+         zb = zbw + ze * zs
+         !
+         zd = -2.042967e-2
+         zc =   (-7.267926e-5*zt+2.598241e-3 ) *zt+0.1571896
+         zaw= ( ( 5.939910e-6*zt+2.512549e-3 ) *zt-0.1028859d0 ) *zt - 4.721788d0
+         za = ( zd*zsr + zc ) *zs + zaw
+         !
+         zb1=   (  -0.1909078d0  *zt+7.390729d0    ) *zt-55.87545d0
+         za1= ( (   2.326469e-3*zt+1.553190d0    ) *zt-65.00517d0 ) *zt + 1044.077d0
+         zkw= ( ( (-1.361629e-4*zt-1.852732e-2 ) *zt-30.41638d0 ) *zt + 2098.925d0 ) *zt+190925.6d0
+         zk0= ( zb1*zsr + za1 )*zs + zkw
+
+         zh = 1000.d0*depth_km
+         rho00 = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  )
+
+         DO i=1,n
+            IF (mask(i)) THEN
+               drho0(i) = fillvalue
+               CYCLE
+            END IF
+            zh = depth(i)
+            ! masked in situ density anomaly
+            drho0(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - rho00, KIND=4)
+            END DO
+      END SELECT
+      !
+   END SUBROUTINE eos_insitu04_m
+
+   SUBROUTINE eos_init(neos_in)
       !!----------------------------------------------------------------------
       !!                 ***  ROUTINE eos_init  ***
       !!
@@ -1513,6 +2262,10 @@ CONTAINS
       !!----------------------------------------------------------------------
       !
       !
+      INTEGER*4 neos_in
+
+
+      neos = neos_in
       SELECT CASE( neos )         ! check option
       !
       CASE( np_teos10 )                       !==  polynomial TEOS-10  ==!
@@ -1644,7 +2397,7 @@ CONTAINS
          BET002 = -6.1618945251d-02
          BET102 = 6.2255521644d-02
          BET012 = -2.6514181169d-03
-         BET003 = -2.3025968587d-04d0
+         BET003 = -2.3025968587d-04
          !
          PEN000 = -9.8409626043d0
          PEN100 = 2.1274999107d+01
@@ -1888,10 +2641,10 @@ CONTAINS
          BPE011 = 2.8711395266d-03
          BPE002 = 5.3661089288d-04
          !
+         IF(neos == np_teos10) r1_S0  = 0.875d0/35.16504d0   ! Used to convert CT to potential temperature when using bulk formulae
+                                         !   (eos_pot_from_CT)
       CASE( np_seos )                        !==  Simplified EOS     ==!
 
-         r1_S0  = 0.875d0/35.16504d0   ! Used to convert CT to potential temperature when using bulk formulae
-                                         !   (eos_pot_from_CT)
       END SELECT
       !
       r1_rho0     = 1.d0 / rho0
@@ -1903,5 +2656,5 @@ CONTAINS
       !
    END SUBROUTINE eos_init
 
-   !!======================================================================
+!    !!======================================================================
 END MODULE eosbn2
