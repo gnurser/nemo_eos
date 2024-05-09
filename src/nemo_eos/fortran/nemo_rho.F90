@@ -203,32 +203,37 @@ CONTAINS
       !!       potential temperature salinity and depth using an equation of state
       !!       selected in the nameos namelist
       !!
-      !! ** Method  :   rho(t,s,z) = r0(z) + [r(t,s,z) - r0(z)] - 1000.
+      !! ** Method  :   rho(t,s,z) = r0(z) + r(z)=[rho(t,s,z) - r0(z)] - 1000.
       !!                t      TEOS10: CT or EOS80: PT      Celsius
       !!                s      TEOS10: SA or EOS80: SP      TEOS10: g/kg or EOS80: psu
       !!                z      depth                        meters
       !!                rho    in situ density anomaly      kg/m^3
       !!
-      !!     ln_teos10 : polynomial TEOS-10 equation of state is used for rho(t,s,z).
+      !!     np_teos10 : polynomial TEOS-10 equation of state is used for rho(t,s,z).
       !!               Note global mean r0(z)
-      !!         Check value: rho = 28.21993233072 kg/m^3 for z=3000 dbar, ct=3 Celsius, sa=35.5 g/kg
+      !!         Check value: rho - r0 = 28.21993233072 kg/m^3 for z=3000 dbar, ct=3 Celsius, sa=35.5 g/kg
       !!
-      !!     ln_eos80 : polynomial EOS-80 equation of state is used for rho(t,s,z).
-      !!         Check value: rho = 28.35011066567 kg/m^3 for z=3000 dbar, pt=3 Celsius, sp=35.5 psu
+      !!     np_eos80 : polynomial EOS-80 equation of state is used for rho(t,s,z).
+      !!         Check value: rho-r? = 28.35011066567 kg/m^3 for z=3000 dbar, pt=3 Celsius, sp=35.5 psu
       !!
-      !!     ln_seos : simplified equation of state
+      !!     np_seos : simplified equation of state
       !!              rho(t,s,z) = rho0 -a0*(1+lambda/2*(T-T0)+mu*z+nu*(S-S0))*(T-T0) + b0*(S-S0) - 1000.
       !!              linear case function of T only: rn_alpha<>0, other coefficients = 0
       !!              linear eos function of T and S: rn_alpha and rn_beta<>0, other coefficients=0
       !!              Vallis like equation: use default values of coefficients
       !!
+      !!   np_old_eos80: original Jackett and Macdougall (1994) EOS80
+      !!         Check value: rho = 1060.93298 kg/m**3 for p=10000 dbar,
+      !!          t = 40 deg celcius, s=40 psu
+      !!
       !! ** Action  :   compute rho , the in situ density anomaly (kg/m^3)
       !!
       !! References :   Roquet et al, Ocean Modelling (2015)
+      !!                Jackett and McDougall, J. Atmos. Ocean. Tech., 1994
       !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
       !!                TEOS-10 Manual, 2010
       !!----------------------------------------------------------------------
-      INTEGER*4, INTENT(IN)                        ::   n
+      INTEGER*4, INTENT(IN)                        ::  n
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
       REAL*4, DIMENSION(n), INTENT(in)             ::  depth   ! depth                                 [m]
@@ -239,7 +244,7 @@ CONTAINS
       REAL*8  :: zs! local scalars
       REAL*8  :: zn1, zn2!   -      -
       REAL*8  :: zn, zn0, zn3!   -      -
-      REAL*8  :: r0
+      REAL*8  :: zr0
       ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
       REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
       REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
@@ -249,6 +254,7 @@ CONTAINS
       !
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
+         !$omp parallel do private(zt,zs,zh,zn,zn0,zn1,zn2,zn3,zr0)
          DO i=1,n
             !
             zh  = depth(i) * r1_Z0                                  ! depth
@@ -280,9 +286,9 @@ CONTAINS
     !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
             IF (neos == np_teos10) THEN
-            !!  Add reference profile r0 to anomaly
-               r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-               rho(i) = REAL(zn - 1000.d0 + r0, KIND=4)
+            !!  Add reference profile zr0 to anomaly
+               zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+               rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
             ELSE
                rho(i) = REAL(zn - 1000.d0, KIND=4)
             END IF
@@ -291,6 +297,7 @@ CONTAINS
             ! prd(i) = (  zn * r1_rho0 - 1.d0  ) * ztm  ! density anomaly (masked)
             !
          END DO
+         !$omp  end parallel do
          !
       CASE( np_seos )                !==  simplified EOS  ==!
          !
@@ -308,6 +315,7 @@ CONTAINS
          END DO
          !
       CASE(np_old_eos80)
+         !$omp parallel do private(zt,zs,zh,zsr,zr1,zr2,zr3,zr4,zrhop,ze, zbw,zb, zd, zc, zaw, za, zb1, za1, zkw, zk0)
          DO i=1,n
             zt = T(i)
             zs = S(i)
@@ -344,6 +352,7 @@ CONTAINS
             ! masked in situ density anomaly
             rho(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0, KIND=4)
          END DO
+         !$omp  end parallel do
       END SELECT
       !
     END SUBROUTINE eos_insitu4
@@ -376,6 +385,10 @@ CONTAINS
       !!              linear eos function of T and S: rn_alpha and rn_beta<>0, other coefficients=0
       !!              Vallis like equation: use default values of coefficients
       !!
+      !!   np_old_eos80: original Macdougall and Jackett EOS80
+      !!         Check value: rho = 1060.93298 kg/m**3 for p=10000 dbar,
+      !!          t = 40 deg celcius, s=40 psu
+      !!
       !! ** Action  :   compute rho , the in situ density (kg/m^3)
       !!
       !! References :   Roquet et al, Ocean Modelling (2015)
@@ -395,7 +408,7 @@ CONTAINS
       REAL*8  :: zs! local scalars
       REAL*8  :: zn1, zn2!   -      -
       REAL*8  :: zn, zn0, zn3!   -      -
-      REAL*8  :: r0
+      REAL*8  :: zr0
       ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
       REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
       REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
@@ -405,6 +418,7 @@ CONTAINS
       !
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
+         !$omp parallel do private(zt,zs,zh,zn,zn0,zn1,zn2,zn3,zr0)
          DO i=1,n
             IF (mask(i)) THEN
                rho(i) = fillvalue
@@ -440,9 +454,9 @@ CONTAINS
     !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
             IF (neos == np_teos10) THEN
-            !!  Add reference profile r0 to anomaly
-               r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-               rho(i) = REAL(zn - 1000.d0 + r0, KIND=4)
+            !!  Add reference profile zr0 to anomaly
+               zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+               rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
             ELSE
                rho(i) = REAL(zn - 1000.d0, KIND=4)
             END IF
@@ -451,6 +465,7 @@ CONTAINS
             ! prd(i) = (  zn * r1_rho0 - 1.d0  ) * ztm  ! density anomaly (masked)
             !
          END DO
+         !$omp  end parallel do
          !
       CASE( np_seos )                !==  simplified EOS  ==!
          !
@@ -472,6 +487,7 @@ CONTAINS
          END DO
          !
       CASE(np_old_eos80)
+         !$omp parallel do private(zt,zs,zh,zsr,zr1,zr2,zr3,zr4,zrhop,ze, zbw,zb, zd, zc, zaw, za, zb1, za1, zkw, zk0)
          DO i=1,n
             IF (mask(i)) THEN
                rho(i) = fillvalue
@@ -513,6 +529,7 @@ CONTAINS
             ! masked in situ density anomaly
             rho(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0, KIND=4)
          END DO
+         !$omp  end parallel do
        END SELECT
       !
     END SUBROUTINE eos_insitu4_m
@@ -561,7 +578,7 @@ CONTAINS
       REAL*8  :: zs! local scalars
       REAL*8  :: zn1, zn2!   -      -
       REAL*8  :: zn, zn0, zn3!   -      -
-      REAL*8  :: r0
+      REAL*8  :: zr0
       ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
       REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
       REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
@@ -573,8 +590,8 @@ CONTAINS
          !
          zh = depth_km * 1.d3 * r1_Z0
          IF (neos == np_teos10) THEN
-            ! Define reference profile r0 to be added to anomaly
-             r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+            ! Define reference profile zr0 to be added to anomaly
+             zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
          END IF
          DO i=1,n
             !
@@ -606,8 +623,8 @@ CONTAINS
     !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
             IF (neos == np_teos10) THEN
-            !!  Add reference profile r0 to anomaly
-               rho(i) = REAL(zn - 1000.d0 + r0, KIND=4)
+            !!  Add reference profile zr0 to anomaly
+               rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
             ELSE
                rho(i) = REAL(zn - 1000.d0, KIND=4)
             END IF
@@ -722,7 +739,7 @@ CONTAINS
       REAL*8  :: zs! local scalars
       REAL*8  :: zn1, zn2!   -      -
       REAL*8  :: zn, zn0, zn3!   -      -
-      REAL*8  :: r0
+      REAL*8  :: zr0
       ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
       REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
       REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
@@ -734,8 +751,8 @@ CONTAINS
          !
          zh = depth_km * 1.d3 * r1_Z0
          IF (neos == np_teos10) THEN
-            ! Define reference profile r0 to be added to anomaly
-              r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+            ! Define reference profile zr0 to be added to anomaly
+              zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
          END IF
          DO i=1,n
             IF (mask(i)) THEN
@@ -771,8 +788,8 @@ CONTAINS
     !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
             IF (neos == np_teos10) THEN
-            !!  Add reference profile r0 to anomaly
-               rho(i) = REAL(zn - 1000.d0 + r0, KIND=4)
+            !!  Add reference profile zr0 to anomaly
+               rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
             ELSE
                rho(i) = REAL(zn - 1000.d0, KIND=4)
             END IF
@@ -1037,8 +1054,38 @@ CONTAINS
       !!
       !! ** Method  :   calculates (unmasked) alpha / beta at T-points
       !!
-      !! ** Action  : - outputs ajpha, beta     : thermal/haline expansion ratio at T-points
-      !!----------------------------------------------------------------------
+      !!                T      TEOS10: CT or EOS80: PT      [Celsius]
+      !!                S      TEOS10: SA or EOS80: SP      TEOS10: [g/kg] or EOS80: [psu]
+      !!                depth      depth                        [meters]
+      !!                alpha     thermal expansion coeficient [K^{-1}]
+      !!                beta     saline contraction coeficient TEOS-10 [kg/g] or EOS80 [psu^{-1}]
+      !!
+      !!     np_teos10 : polynomial TEOS-10
+      !!          Check values for SA = 30 g/kg, CT = 10◦C, Z = −1000 m:
+      !!          a = alpha*rho0 = 0.179646281 kg m−3 K−1 , b = beta*rho0 = 0.765555368 kg m−3 (g/kg)−1 .
+      !!
+      !!
+      !!     np_eos80 : polynomial EOS-80 equation of state is used for alpha, beta.
+      !!         Check value: ??
+      !!
+      !!     np_seos : simplified equation of state
+      !!              rho(t,s,z) = rho0 -a0*(1+lambda/2*(T-T0)+mu*z+nu*(S-S0))*(T-T0) + b0*(S-S0) - 1000.
+      !!              linear case function of T only: rn_alpha<>0, other coefficients = 0
+      !!              linear eos function of T and S: rn_alpha and rn_beta<>0, other coefficients=0
+      !!              Vallis like equation: use default values of coefficients
+      !!
+      !!   np_old_eos80: 
+      !!         References :   McDougall, J. Phys. Oceanogr., 17, 1950-1964, 1987.
+      !!         Check value: alpha/beta = 0.34763 psu/K at T=10 Celsius, psu = 40 psu, depth=4000m
+      !!         Check value: beta = 0.72088 x 1.e-3 [psu^{-1}]   at T=10 Celsius, psu = 40 psu, depth=4000m
+      !!
+      !! ** Action  : - outputs alpha, beta     : thermal/haline expansion ratio at T-points
+      !!
+      !! References :   Roquet et al, Ocean Modelling (2015)
+      !!                Jackett and McDougall, J. Atmos. Ocean. Tech., 1994
+      !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
+      !!                TEOS-10 Manual, 2010
+       !!----------------------------------------------------------------------
       INTEGER*4, INTENT(IN)                        ::   n
       REAL*4, DIMENSION(n), INTENT(in)             ::  T       ! potential/conservative temperature  [Celsius]
       REAL*4, DIMENSION(n), INTENT(in)             ::  S       ! practical/absolute salinity        [psu/g/kg]
@@ -1939,7 +1986,7 @@ CONTAINS
       REAL*8  :: zn1, zn2!   -      -
       REAL*8  :: zn, zn0, zn3!   -      -
       REAL*8  :: rho00
-      REAL*8  :: r0
+      REAL*8  :: zr0
       ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
       REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
       REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
@@ -1979,9 +2026,9 @@ CONTAINS
             zh  = depth_km * 1.d3 * r1_Z0 
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
             IF (neos == np_teos10) THEN
-            !!  Add reference profile r0 to anomaly
-               r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-               rho00 = zn - 1000.d0 + r0
+            !!  Add reference profile zr0 to anomaly
+               zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+               rho00 = zn - 1000.d0 + zr0
             ELSE
                rho00 = zn - 1000.d0
             END IF
@@ -1993,9 +2040,9 @@ CONTAINS
     !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
             IF (neos == np_teos10) THEN
-            !!  Add reference profile r0 to anomaly
-               r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-               drho0(i) = REAL(zn - 1000.d0 + r0 - rho00, KIND=4)
+            !!  Add reference profile zr0 to anomaly
+               zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+               drho0(i) = REAL(zn - 1000.d0 + zr0 - rho00, KIND=4)
             ELSE
                drho0(i) = REAL(zn - 1000.d0 - rho00, KIND=4)
             END IF
@@ -2114,7 +2161,7 @@ CONTAINS
       REAL*8  :: zn1, zn2!   -      -
       REAL*8  :: zn, zn0, zn3!   -      -
       REAL*8  :: rho00
-      REAL*8  :: r0
+      REAL*8  :: zr0
       ! For old_eos80 (Jackett and McDougall, J. Atmos. Ocean. Tech., 1994)
       REAL*8 ::   zsr, zr1, zr2, zr3, zr4, zrhop, ze, zbw   ! temporary scalars
       REAL*8 ::   zb, zd, zc, zaw, za, zb1, za1, zkw, zk0        !    -         -
@@ -2154,9 +2201,9 @@ CONTAINS
             zh  = depth_km * 1.d3 * r1_Z0 
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
             IF (neos == np_teos10) THEN
-            !!  Add reference profile r0 to anomaly
-               r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-               rho00 = zn - 1000.d0 + r0
+            !!  Add reference profile zr0 to anomaly
+               zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+               rho00 = zn - 1000.d0 + zr0
             ELSE
                rho00 = zn - 1000.d0
             END IF
@@ -2172,9 +2219,9 @@ CONTAINS
     !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
             IF (neos == np_teos10) THEN
-            !!  Add reference profile r0 to anomaly
-               r0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-               drho0(i) = REAL(zn - 1000.d0 + r0 - rho00, KIND=4)
+            !!  Add reference profile zr0 to anomaly
+               zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+               drho0(i) = REAL(zn - 1000.d0 + zr0 - rho00, KIND=4)
             ELSE
                drho0(i) = REAL(zn - 1000.d0 - rho00, KIND=4)
             END IF
