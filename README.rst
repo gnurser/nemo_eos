@@ -110,40 +110,38 @@ check works OK and explore
    Type 'copyright', 'credits' or 'license' for more information
    IPython 8.22.1 -- An enhanced Interactive Python. Type '?' for help.
 
-   In [1]: from nemo_eos.nemo_rho_omp import eos
+   In [1]: from nemo_eos.nemo_rho import eos
 
-   In [2]: eos.grav
-   Out[2]: array(9.80665016)
+   In [2]: eos.rho0
+   Out[2]: array(1026.)
 
 Type in ``eos.<TAB>`` to get list of functions, options, constants etc. Then select routine with cursor keys
 
 .. code-block :: python
 
-   In [3]: eos.rho_mn4
-    alpha_beta4        alpha_beta_n4      grav               rho_mn4            s00                sigma_n4          
-    alpha_beta8        drho0_mn4          neos               rho_mn8            set_eos            sigma_n8          
-    alpha_beta8_nomask drho0_mn8          rau0               rn_alpha           set_eos_threads    theta00           
-    alpha_beta_04      fillvalue          rho000             rn_beta            sigma_n                              
-    instance
-
+   In [3]: eos.eos_insitu4_m
+            eos_init        eos_insitu4_m   eos_rab_ref4    eos_sigman4     neos            rn_lambda1      rn_nu          
+            eos_insitu04    eos_pen4        eos_rab_ref4_m  eos_sigman4_m   rho0            rn_lambda2      set_eos        
+            eos_insitu04_m  eos_rab4        eos_sigma04     get_eos_threads rn_a0           rn_mu1          set_eos_threads
+            eos_insitu4     eos_rab4_m      eos_sigma04_m   get_r0          rn_b0           rn_mu2 
 Then when desired routine is selected, type <RET> and other options will disappear
 
 .. code-block :: python
 
-   In [3]: eos.rho_mn4
+   In [3]: eos.eos_insitu4_m
 
 Then type ?<RET>, and ipython will give description of how to call the routine:
 
 .. code-block :: python
 
-   In [3]: eos.rho_mn4?
+   In [3]: eos.eos_insitu4_m?
    Call signature: eos.rho_mn4(*args, **kwargs)
    Type:           fortran
-   String form:    <fortran function rho_mn4>
+   String form:    <fortran function eos_insitu4_m>
    Docstring:     
-   rho = rho_mn4(fillvalue,mask,theta,s,depth,[n])
+   rho = eos_insitu4_m(fillvalue,mask,theta,s,depth,[n])
 
-   Wrapper for ``rho_mn4``.
+   Wrapper for ``eos_insitu4_m``.
 
    Parameters
    ----------
@@ -163,14 +161,14 @@ Then type ?<RET>, and ipython will give description of how to call the routine:
    rho : rank-1 array('f') with bounds (n)
 
 
-Check ``eos.rho_mn4``, routine for calculating in-situ density. Check value is ``rho = 1060.93298 kg/m**3`` for ``p=10000 dbar``, ``theta = 40 deg celcius``, ``S=40 psu``
+Check ``eos.eos_insitu4_m``, routine for calculating in-situ density. Check value is ``rho = 1060.93298 kg/m**3`` for ``p=10000 dbar``, ``theta = 40 deg celcius``, ``S=40 psu``
 
 .. code-block :: python
 
-   In [4]: eos.rho_mn4(1.e10, False, 40.0, 40.0, 1.e4)
+   In [4]: eos.eos_insitu4_m(1.e10, False, 40.0, 40.0, 1.e4)
    Out[4]: array([60.93299], dtype=float32)
 
-Check speed of ``eos.rho_mn4`` for typical number of points for 1 and 4 OpenMP threads
+Check speed of ``eos.eos_insitu4_m`` for typical number of points for 1 and 4 OpenMP threads
 
 .. code-block :: python
 
@@ -190,12 +188,12 @@ Check speed of ``eos.rho_mn4`` for typical number of points for 1 and 4 OpenMP t
 
    In [7]: eos.set_eos_threads(1)
 
-   In [8]: timeit rho = eos.rho_mn4(fillvalue,mask,T4,S4,depth4)
+   In [8]: timeit rho = eos.eos_insitu4_m(fillvalue,mask,T4,S4,depth4)
    1.05 ms ± 5.82 µs per loop (mean ± std. dev. of 7 runs, 1,000 loops each)
 
    In [9]: eos.set_eos_threads(4)
    
-   In [10]: timeit rho = eos.rho_mn4(fillvalue,mask,T4,S4,depth4)
+   In [10]: timeit rho = eos.eos_insitu4_m(fillvalue,mask,T4,S4,depth4)
    320 µs ± 28.6 µs per loop (mean ± std. dev. of 7 runs, 1,000 loops each)   
 
 
