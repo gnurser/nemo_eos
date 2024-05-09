@@ -1,7 +1,7 @@
-MODULE eosbn2
+MODULE eos
    !!==============================================================================
-   !!                       ***  MODULE  eosbn2  ***
-   !! Equation Of Seawater : in situ density - Brunt-Vaisala frequency
+   !!                       ***  MODULE  eos  ***
+   !! Equation Of Seawater : in situ density 
    !!==============================================================================
    !! History :  OPA  ! 1989-03  (O. Marti)  Original code
    !!            6.0  ! 1994-07  (G. Madec, M. Imbard)  add bn2
@@ -2712,4 +2712,4 @@ CONTAINS
    END SUBROUTINE eos_init
 
 !    !!======================================================================
-END MODULE eosbn2
+END MODULE eos
