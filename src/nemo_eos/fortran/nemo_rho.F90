@@ -42,7 +42,8 @@ MODULE eos
    USE OMP_LIB, ONLY : omp_set_num_threads, omp_get_thread_num, omp_get_max_threads
    IMPLICIT NONE
 
-   INTEGER     ::   neos            ! Identifier for equation of state used
+   INTEGER     ::   neos = -10           ! Identifier for equation of state used;
+                                         ! set to bad value until init called
 
    INTEGER, PRIVATE , PARAMETER ::   np_teos10    = -1 ! parameter for using TEOS10
    INTEGER, PRIVATE , PARAMETER ::   np_eos80     =  0 ! parameter for using EOS80
@@ -163,11 +164,6 @@ CONTAINS
        nthreads = omp_get_max_threads()
      END SUBROUTINE get_eos_threads
 
-     SUBROUTINE set_eos(neos_in)
-       INTEGER*4, INTENT(IN)  :: neos_in
-       neos = neos_in
-     END SUBROUTINE set_eos
-
      SUBROUTINE get_r0( depth_km, r0)
       !!----------------------------------------------------------------------
       !!                  ***  ROUTINE sigma_n4  ***
@@ -214,7 +210,7 @@ CONTAINS
       !!         Check value: rho - r0 = 28.21993233072 kg/m^3 for z=3000 dbar, ct=3 Celsius, sa=35.5 g/kg
       !!
       !!     np_eos80 : polynomial EOS-80 equation of state is used for rho(t,s,z).
-      !!         Check value: rho-r? = 28.35011066567 kg/m^3 for z=3000 dbar, pt=3 Celsius, sp=35.5 psu
+      !!         Check value: rho-r0 = 28.35011066567 kg/m^3 for z=3000 dbar, pt=3 Celsius, sp=35.5 psu
       !!
       !!     np_seos : simplified equation of state
       !!              rho(t,s,z) = rho0 -a0*(1+lambda/2*(T-T0)+mu*z+nu*(S-S0))*(T-T0) + b0*(S-S0) - 1000.
@@ -285,13 +281,9 @@ CONTAINS
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
     !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
-            IF (neos == np_teos10) THEN
             !!  Add reference profile zr0 to anomaly
-               zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-               rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
-            ELSE
-               rho(i) = REAL(zn - 1000.d0, KIND=4)
-            END IF
+            zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+            rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
     !!----------------------------------------------------------------------
             !
             ! prd(i) = (  zn * r1_rho0 - 1.d0  ) * ztm  ! density anomaly (masked)
@@ -353,6 +345,9 @@ CONTAINS
             rho(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0, KIND=4)
          END DO
          !$omp  end parallel do
+      CASE DEFAULT
+         PRINT *,'eos_insitu4 called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
     END SUBROUTINE eos_insitu4
@@ -453,13 +448,9 @@ CONTAINS
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
     !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
-            IF (neos == np_teos10) THEN
             !!  Add reference profile zr0 to anomaly
-               zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-               rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
-            ELSE
-               rho(i) = REAL(zn - 1000.d0, KIND=4)
-            END IF
+            zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+            rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
     !!----------------------------------------------------------------------
             !
             ! prd(i) = (  zn * r1_rho0 - 1.d0  ) * ztm  ! density anomaly (masked)
@@ -530,7 +521,10 @@ CONTAINS
             rho(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0, KIND=4)
          END DO
          !$omp  end parallel do
-       END SELECT
+      CASE DEFAULT
+         PRINT *,'eos_insitu4 called without neos set by previous call of eos_init'
+         STOP
+      END SELECT
       !
     END SUBROUTINE eos_insitu4_m
 
@@ -589,10 +583,9 @@ CONTAINS
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
          zh = depth_km * 1.d3 * r1_Z0
-         IF (neos == np_teos10) THEN
-            ! Define reference profile zr0 to be added to anomaly
-             zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-         END IF
+         ! Define reference profile zr0 to be added to anomaly
+         zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+         !$omp parallel do private(zt,zs,zn,zn0,zn1,zn2,zn3)
          DO i=1,n
             !
             zt  = T (i) * r1_T0                           ! temperature
@@ -620,19 +613,16 @@ CONTAINS
                &   + (((((EOS600*zs+EOS500)*zs+EOS400)*zs+EOS300)*zs+EOS200)*zs+EOS100)*zs+EOS000
                !
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
-    !!----------------------------------------------------------------------
+      !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
-            IF (neos == np_teos10) THEN
             !!  Add reference profile zr0 to anomaly
                rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
-            ELSE
-               rho(i) = REAL(zn - 1000.d0, KIND=4)
-            END IF
-    !!----------------------------------------------------------------------
+      !!----------------------------------------------------------------------
             !
             ! prd(i) = (  zn * r1_rho0 - 1.d0  ) * ztm  ! density anomaly (masked)
             !
          END DO
+         !$omp end parallel do
          !
       CASE( np_seos )                !==  simplified EOS  ==!
          !
@@ -650,8 +640,9 @@ CONTAINS
          END DO
          !
       CASE(np_old_eos80)
-          zh = depth_km*1000.d0                  ! depth
-          DO i=1,n
+         zh = depth_km*1000.d0                  ! depth
+         !$omp parallel do private(zt,zs,zsr,zr1,zr2,zr3,zr4,zrhop,ze, zbw,zb, zd, zc, zaw, za, zb1, za1, zkw, zk0)
+         DO i=1,n
              zt = T(i)
              zs = S(i)
              zsr= SQRT( ABS( zs) )        ! square root salinity
@@ -685,7 +676,11 @@ CONTAINS
              !
              ! unmasked in situ density anomaly
              rho(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0, KIND=4)
-          end do
+          END DO
+         !$omp end parallel do
+      CASE DEFAULT
+         PRINT *,'eos_sigman called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
    END SUBROUTINE eos_sigman4
@@ -750,10 +745,9 @@ CONTAINS
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
          zh = depth_km * 1.d3 * r1_Z0
-         IF (neos == np_teos10) THEN
-            ! Define reference profile zr0 to be added to anomaly
-              zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-         END IF
+         ! Define reference profile zr0 to be added to anomaly
+         zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+         !$omp parallel do private(zt,zs,zn,zn0,zn1,zn2,zn3)
          DO i=1,n
             IF (mask(i)) THEN
                rho(i) = fillvalue
@@ -787,17 +781,14 @@ CONTAINS
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
     !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
-            IF (neos == np_teos10) THEN
             !!  Add reference profile zr0 to anomaly
-               rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
-            ELSE
-               rho(i) = REAL(zn - 1000.d0, KIND=4)
-            END IF
+            rho(i) = REAL(zn - 1000.d0 + zr0, KIND=4)
     !!----------------------------------------------------------------------
             !
             ! prd(i) = (  zn * r1_rho0 - 1.d0  ) * ztm  ! density anomaly (masked)
             !
          END DO
+         !$omp end parallel do
          !
       CASE( np_seos )                !==  simplified EOS  ==!
          !
@@ -820,6 +811,7 @@ CONTAINS
          !
       CASE(np_old_eos80)
          zh = depth_km*1000.d0                  ! depth
+         !$omp parallel do private(zt,zs,zsr,zr1,zr2,zr3,zr4,zrhop,ze, zbw,zb, zd, zc, zaw, za, zb1, za1, zkw, zk0 )
          DO i=1,n
             IF (mask(i)) THEN
                rho(i) = fillvalue
@@ -859,6 +851,10 @@ CONTAINS
             ! unmasked in situ density anomaly
             rho(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - 1000.d0, KIND=4)
           END DO
+         !$omp end parallel do
+      CASE DEFAULT
+         PRINT *,'eos_sigman4_m called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
    END SUBROUTINE eos_sigman4_m
@@ -896,6 +892,7 @@ CONTAINS
          !
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
+         !$omp parallel do private(zt,zs,zn0 )
          DO i=1,n
             zt  = T (i) * r1_T0                           ! temperature
             zs  = SQRT( ABS( S(i) + rdeltaS ) * r1_S0 )   ! square root salinity
@@ -909,6 +906,7 @@ CONTAINS
             !
             sigma0(i) = REAL(zn0 - 1000.d0, KIND=4)                          ! potential density referenced at the surface
          END DO
+         !$omp end parallel do
 
       CASE( np_seos )                !==  simplified EOS  ==!
          !
@@ -924,6 +922,7 @@ CONTAINS
          END DO
          !
       CASE(np_old_eos80)
+         !$omp parallel do private(zt,zs,zsr,zr1,zr2,zr3,zr4,zrhop )
          DO i=1,n
              zt = T(i)
              zs = S(i)
@@ -942,7 +941,11 @@ CONTAINS
              zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
              ! masked in situ density anomaly
              sigma0(i) = REAL(zrhop - 1000.d0, KIND=4)
-          END DO
+         END DO
+         !$omp end parallel do
+      CASE DEFAULT
+         PRINT *,'eos_sigma04 called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
    END SUBROUTINE eos_sigma04
@@ -982,6 +985,7 @@ CONTAINS
          !
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
+         !$omp parallel do private(zt,zs,zn0 )
          DO i=1,n
             IF (mask(i)) THEN
                sigma0(i) = fillvalue
@@ -999,6 +1003,7 @@ CONTAINS
             !
             sigma0(i) = REAL(zn0 - 1000.d0, KIND=4)                          ! potential density referenced at the surface
          END DO
+         !$omp end parallel do
 
       CASE( np_seos )                !==  simplified EOS  ==!
          !
@@ -1018,6 +1023,7 @@ CONTAINS
          END DO
          !
       CASE(np_old_eos80)
+         !$omp parallel do private(zt,zs,zsr,zr1,zr2,zr3,zr4,zrhop )
          DO i=1,n
              if (mask(i)) then
                 sigma0(i) = fillvalue
@@ -1040,7 +1046,11 @@ CONTAINS
              zrhop= ( zr4*zs + zr3*zsr + zr2 ) *zs + zr1
              ! masked in situ density anomaly
              sigma0(i) = REAL(zrhop - 1000.d0, KIND=4)
-          END DO
+         END DO
+         !$omp end parallel do
+      CASE DEFAULT
+         PRINT *,'eos_sigma04_m called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
    END SUBROUTINE eos_sigma04_m
@@ -1105,7 +1115,8 @@ CONTAINS
       !
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
-         do i=1,n
+         !$omp parallel do private(zt,zs,zh,zn,zn0,zn1,zn2,zn3)
+         DO i=1,n
             !
             zh  = depth (i) * r1_Z0                                ! depth
             zt  = T (i) * r1_T0                           ! temperature
@@ -1154,6 +1165,7 @@ CONTAINS
             beta(i) =  REAL(zn / zs * r1_rho0, KIND=4)
             !
          END DO
+         !$omp end parallel do
          !
       CASE( np_seos )                  !==  simplified EOS  ==!
          !
@@ -1172,6 +1184,7 @@ CONTAINS
          END DO
          !
       CASE( np_old_eos80 )                  !==  simplified EOS  ==!
+         !$omp parallel do private(zt,zs,zh, zalbet)
          DO i=1,n
             zt = T(i)
             zs = S(i) - 35.d0
@@ -1204,6 +1217,10 @@ CONTAINS
                  &    , KIND=4)
             alpha(i) = REAL(zalbet*beta(i), KIND=4)
          END DO
+         !$omp end parallel do
+      CASE DEFAULT
+         PRINT *,'eos_rab4 called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
    END SUBROUTINE eos_rab4
@@ -1240,6 +1257,7 @@ CONTAINS
       !
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
+         !$omp parallel do private(zt,zs,zh,zn,zn0,zn1,zn2,zn3)
          DO i=1,n
             IF (mask(i)) THEN
                alpha(i) = fillvalue
@@ -1294,6 +1312,7 @@ CONTAINS
             beta(i) =  REAL(zn / zs * r1_rho0, KIND=4)
             !
          END DO
+         !$omp end parallel do
          !
       CASE( np_seos )                  !==  simplified EOS  ==!
          !
@@ -1317,6 +1336,7 @@ CONTAINS
          !
       CASE( np_old_eos80 )                  !==  old EOS  ==!
          !
+         !$omp parallel do private(zt,zs,zh, zalbet)
          DO i=1,n
             IF (mask(i)) THEN
                alpha(i) = fillvalue
@@ -1354,7 +1374,11 @@ CONTAINS
                  &   , KIND=4)
             alpha(i) = REAL( zalbet*beta(i), KIND=4)
          END DO
+         !$omp end parallel do
          !
+      CASE DEFAULT
+         PRINT *,'eos_rab4_m called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
    END SUBROUTINE eos_rab4_m
@@ -1389,7 +1413,8 @@ CONTAINS
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          zh  = depth_km*1.d3 * r1_Z0                                ! depth
          !
-         do i=1,n
+         !$omp parallel do private(zt,zs,zn,zn0,zn1,zn2,zn3)
+         DO i=1,n
             !
             zt  = T (i) * r1_T0                           ! temperature
             zs  = SQRT( ABS( S(i) + rdeltaS ) * r1_S0 )   ! square root salinity
@@ -1437,6 +1462,7 @@ CONTAINS
             beta(i) =  REAL(zn / zs * r1_rho0, KIND=4)
             !
          END DO
+         !$omp end parallel do
          !
       CASE( np_seos )                  !==  simplified EOS  ==!
          !
@@ -1455,6 +1481,7 @@ CONTAINS
          !
       CASE( np_old_eos80 )                  !==  simplified EOS  ==!
          zh  = depth_km*1.d3
+         !$omp parallel do private(zt,zs,zalbet)
          DO i=1,n
             zt = T(i)
             zs = S(i) - 35.d0
@@ -1486,6 +1513,9 @@ CONTAINS
                  &    , KIND=4)
             alpha(i) = REAL(zalbet*beta(i), KIND=4)
          END DO
+      CASE DEFAULT
+         PRINT *,'eos_rab4_ref4 called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
    END SUBROUTINE eos_rab_ref4
@@ -1523,6 +1553,7 @@ CONTAINS
       CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          zh  = depth_km*1.d3 * r1_Z0                                ! depth
          !
+         !$omp parallel do private(zt,zs,zn,zn0,zn1,zn2,zn3)
          DO i=1,n
             IF (mask(i)) THEN
                alpha(i) = fillvalue
@@ -1576,6 +1607,7 @@ CONTAINS
             beta(i) =  REAL(zn / zs * r1_rho0, KIND=4)
             !
          END DO
+         !$omp end parallel do
          !
       CASE( np_seos )                  !==  simplified EOS  ==!
          !
@@ -1600,6 +1632,7 @@ CONTAINS
          !
       CASE( np_old_eos80 )                  !==  simplified EOS  ==!
          zh  = depth_km*1.d3
+         !$omp parallel do private(zt,zs,zalbet)
          DO i=1,n
             zt = T(i)
             zs = S(i) - 35.d0
@@ -1631,6 +1664,10 @@ CONTAINS
                  & , KIND=4)
             alpha(i) = REAL(zalbet*beta(i), KIND=4)
          END DO
+         !$omp end parallel do
+      CASE DEFAULT
+         PRINT *,'eos_rab4_ref4_m called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
     END SUBROUTINE eos_rab_ref4_m
@@ -1707,6 +1744,7 @@ CONTAINS
       z1_S0   = 0.875d0/35.16504d0
       z1_T0   = 1.d0/40.d0
       !
+      !$omp parallel do private(zt,zs,zn,zd)
       DO i=1,n
          !
          zt  = CT(i) * z1_T0
@@ -1728,6 +1766,7 @@ CONTAINS
          pot(i) = REAL( zt / z1_T0 + zn / zd, KIND=4)
             !
       END DO
+      !$omp end parallel do
       !
    END SUBROUTINE eos_pot_from_CT_SA4
 
@@ -1866,6 +1905,7 @@ CONTAINS
        !
        CASE( np_teos10, np_eos80 )                !==  polynomial TEOS-10 / EOS-80 ==!
          !
+         !$omp parallel do private(zt,zs,zn,zn0,zn1,zn2)
          DO i=1,n
             !
             zh  = depth(i) * r1_Z0                                ! depth
@@ -1921,6 +1961,7 @@ CONTAINS
             beta_pe(i) = REAL(zn / zs * zh * r1_rho0, KIND=4)
             !
          END DO
+         !$omp end parallel do
          !
       CASE( np_seos )                !==  Vallis (2006) simplified EOS  ==!
          !
@@ -1938,6 +1979,9 @@ CONTAINS
             !
          END DO
          !
+      CASE DEFAULT
+         PRINT *,'eos_pen4 called without neos set by previous call of eos_init'
+         STOP
       END SELECT
    END SUBROUTINE eos_pen4
 
@@ -1967,7 +2011,7 @@ CONTAINS
       !!              linear eos function of T and S: rn_alpha and rn_beta<>0, other coefficients=0
       !!              Vallis like equation: use default values of coefficients
       !!
-      !! ** Action  :   compute rho , the in situ density anomaly (kg/m^3)
+      !! ** Action  :   compute drho , the difference between in situ and reference density (kg/m^3)
       !!
       !! References :   Roquet et al, Ocean Modelling (2015)
       !!                Vallis, Atmospheric and Oceanic Fluid Dynamics, 2006
@@ -2025,29 +2069,23 @@ CONTAINS
          ELSE
             zh  = depth_km * 1.d3 * r1_Z0 
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
-            IF (neos == np_teos10) THEN
             !!  Add reference profile zr0 to anomaly
-               zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+            zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
                rho00 = zn - 1000.d0 + zr0
-            ELSE
-               rho00 = zn - 1000.d0
-            END IF
          END IF
+        !
+        !$omp parallel do private(zh,zn,zr0)
          DO i=1,n
-            !
             zh  = depth(i) * r1_Z0                                  ! depth
             zn  = ( ( zn3 * zh + zn2 ) * zh + zn1 ) * zh + zn0
     !!----------------------------------------------------------------------
             !!  Subtract 1000. to give density anomaly
-            IF (neos == np_teos10) THEN
             !!  Add reference profile zr0 to anomaly
-               zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
-               drho0(i) = REAL(zn - 1000.d0 + zr0 - rho00, KIND=4)
-            ELSE
-               drho0(i) = REAL(zn - 1000.d0 - rho00, KIND=4)
-            END IF
+            zr0 = (((((R05 * zh + R04) * zh + R03 ) * zh + R02 ) * zh + R01) * zh + R00) * zh
+            drho0(i) = REAL(zn - 1000.d0 + zr0 - rho00, KIND=4)
     !!----------------------------------------------------------------------
          END DO
+         !$omp  end parallel do
 
       CASE( np_seos )                !==  simplified EOS  ==!
          !
@@ -2105,11 +2143,16 @@ CONTAINS
          zh = 1000.d0*depth_km
          rho00 = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  )
 
+         !$omp parallel do private(zh)
          DO i=1,n
             zh = depth(i)
             ! unmasked in situ density anomaly
             drho0(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - rho00, KIND=4)
-            END DO
+         END DO
+         !$omp  end parallel do
+      CASE DEFAULT
+         PRINT *,'eos_insitu04 called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
    END SUBROUTINE eos_insitu04
@@ -2208,6 +2251,7 @@ CONTAINS
                rho00 = zn - 1000.d0
             END IF
          END IF
+         !$omp parallel do private(zh,zn,zr0)
          DO i=1,n
             IF (mask(i)) THEN
                drho0(i) = fillvalue
@@ -2291,6 +2335,7 @@ CONTAINS
          zh = 1000.d0*depth_km
          rho00 = zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  )
 
+         !$omp parallel do private(zh)
          DO i=1,n
             IF (mask(i)) THEN
                drho0(i) = fillvalue
@@ -2300,6 +2345,10 @@ CONTAINS
             ! masked in situ density anomaly
             drho0(i) = REAL(zrhop / (  1.0d0 - zh / ( zk0 - zh * ( za - zh * zb ) )  ) - rho00, KIND=4)
             END DO
+            !$omp end parallel do
+      CASE DEFAULT
+         PRINT *,'eos_insitu04_m called without neos set by previous call of eos_init'
+         STOP
       END SELECT
       !
    END SUBROUTINE eos_insitu04_m
