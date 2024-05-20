@@ -2,7 +2,7 @@ import timeit
 import numpy as np
 from nemo_eos.nemo_rho import eos
 
-def set_test(num):
+def set_test_values(num):
      T = 300*np.random.random_sample(num)
      S = 33. + 7*np.random.random_sample(num)
      depth = 4000*np.random.random_sample(num)
@@ -11,7 +11,6 @@ def set_test(num):
      T4, S4, depth4 = [x.astype(np.float32) for x in [T,S,depth]]
      fillvalue = np.float32(1.e10)
      return fillvalue,mask,T4,S4,depth4
-     
 
 if __name__ =='__main__':
      print('Testing nemo_eos against literature test values for rho, alpha, beta')
@@ -53,21 +52,3 @@ if __name__ =='__main__':
      alpha, beta = eos.eos_rab4(10.,40.,4000.)
      print(f"alpha/beta, beta  are {alpha[0]/beta[0]:f}, {beta[0]*1.e3}x 1.e-3 psu^{-1} "
            "\n            at CT=10°, SA=40.0 g/kg, depth=4000m")
-     
-     
-     #  Check speed of program. Best done with ipython.
-     # from nemo_eos.nemo_rho import eos
-     # from set_test import set_test
-     # fillvalue,mask,T4,S4,depth4 = set_test(100000)
-     # eos.eos_init(-1)
-     # eos.set_eos_threads(1)
-     # timeit rho = eos.eos_insitu4(T4,S4,depth4)
-     # timeit rho = eos.eos_insitu4_m(fillvalue, mask,T4,S4,depth4)
-     # timeit alpha, beta = eos.eos_rab4(T4,S4,depth4)
-     # timeit alpha, beta = eos.eos_rab4_m(fillvalue, mask,T4,S4,depth4)
-     # eos.set_eos_threads(4)
-     # timeit rho = eos.eos_insitu4(T4,S4,depth4)
-     # timeit rho = eos.eos_insitu4_m(fillvalue, mask,T4,S4,depth4)
-     # timeit alpha, beta = eos.eos_rab4(T4,S4,depth4)
-     # timeit alpha, beta = eos.eos_rab4_m(fillvalue, mask,T4,S4,depth4)
-
