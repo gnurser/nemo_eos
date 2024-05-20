@@ -1,0 +1,58 @@
+# IPython log file
+
+# Run in ipython as
+# ipython threads.ipy
+
+from argparse import ArgumentParser
+from gsw import density
+from nemo_eos.nemo_rho import eos
+from set_test import set_test_values
+from nemo_eos.nemo_rho import eos
+
+def tim0(cmd):
+    print('running', cmd)
+    get_ipython().run_line_magic('timeit',cmd)
+
+def tim(cmd, nthreads=4):
+    print('running', cmd, ' with nthreads=',nthreads)
+    eos.set_eos_threads(nthreads)
+    get_ipython().run_line_magic('timeit',cmd)
+
+
+parser = ArgumentParser()
+parser.add_argument("-l","--array_length",type=int, default=100000, help="array length")
+args = parser.parse_args()
+
+fillvalue,mask,T4,S4,depth4 = set_test_values(args.array_length)
+
+print('testing speed vs threads for array length', args.array_length)
+print('\n old EOS')
+eos.eos_init(-1)
+tim('rho = eos.eos_insitu4(T4,S4,depth4)', nthreads=1)
+tim('rho = eos.eos_insitu4(T4,S4,depth4)', nthreads=4)
+tim('rho = eos.eos_insitu4_m(fillvalue, mask,T4,S4,depth4)', nthreads=1)
+tim('rho = eos.eos_insitu4_m(fillvalue, mask,T4,S4,depth4)', nthreads=4)
+tim('rho = eos.eos_insitu04(2.5,35.0,1.,depth4)', nthreads=1)
+tim('rho = eos.eos_insitu04(2.5,35.0,1.,depth4)', nthreads=4)
+tim('alpha, beta = eos.eos_rab4(T4,S4,depth4)', nthreads=1)
+tim('alpha, beta = eos.eos_rab4(T4,S4,depth4)', nthreads=4)
+print('\n NEMO TEOS-10')
+eos.eos_init(2)
+tim('rho = eos.eos_insitu4(T4,S4,depth4)', nthreads=1)
+tim('rho = eos.eos_insitu4(T4,S4,depth4)', nthreads=4)
+tim('rho = eos.eos_insitu4_m(fillvalue, mask,T4,S4,depth4)', nthreads=1)
+tim('rho = eos.eos_insitu4_m(fillvalue, mask,T4,S4,depth4)', nthreads=4)
+tim('rho = eos.eos_insitu04(2.5,35.0,1.,depth4)', nthreads=1)
+tim('rho = eos.eos_insitu04(2.5,35.0,1.,depth4)', nthreads=4)
+tim('alpha, beta = eos.eos_rab4(T4,S4,depth4)', nthreads=1)
+tim('alpha, beta = eos.eos_rab4(T4,S4,depth4)', nthreads=4)
+
+print('\n GSW TEOS-10')
+tim0('rho = density.rho(S4,T4,depth4)')
+tim0('alpha_on_density = density.alpha_on_beta(S4,T4,depth4)')
+tim0('beta = density.beta(S4,T4,depth4)')
+
+# For emacs....
+# Local Variables:
+# mode: python
+# End:
