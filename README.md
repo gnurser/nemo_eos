@@ -98,7 +98,7 @@ Then git clone the source from github and move into new directory
 Build and install
 
 ```
-   dev.bash
+   ../dev.bash
 ```
 
 This first installs some required mamba packages into the `big`
@@ -117,7 +117,7 @@ the routines are accelerated by openMP threads.
 
 - `get_eos_threads()`: returns number of threads that routines use for OpenMP.
 
-- `get_r0(depth)` :  For TEOS10 EOS and new EOS-80 calculate float64 depth-varying offset `r0=rho-r`from float64 `depth` in `m`. (Roquet et al., 2015)
+- `get_r0(depth)` :  For TEOS10 EOS and new EOS-80 calculate float64 depth-varying offset `r0=rho-r`from float64 `depth` in m. (Roquet et al., 2015)
 
 - `eos_insitu4(T, S, depth)`: `float32` in situ density for 1D `float32` arrays of `T, S, depth`
 
