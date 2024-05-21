@@ -4,7 +4,7 @@
 # ipython threads.ipy
 
 from argparse import ArgumentParser
-from gsw import density
+
 from nemo_eos.nemo_rho import eos
 from set_test import set_test_values
 from nemo_eos.nemo_rho import eos
@@ -26,7 +26,8 @@ args = parser.parse_args()
 fillvalue,mask,T4,S4,depth4 = set_test_values(args.array_length)
 
 print('testing speed vs threads for array length', args.array_length)
-print('\n old EOS')
+print(f'default # of threads is {eos.get_eos_threads():d}')
+print('\n old EOS-80')
 eos.eos_init(-1)
 tim('rho = eos.eos_insitu4(T4,S4,depth4)', nthreads=1)
 tim('rho = eos.eos_insitu4(T4,S4,depth4)', nthreads=4)
@@ -36,6 +37,17 @@ tim('rho = eos.eos_insitu04(2.5,35.0,1.,depth4)', nthreads=1)
 tim('rho = eos.eos_insitu04(2.5,35.0,1.,depth4)', nthreads=4)
 tim('alpha, beta = eos.eos_rab4(T4,S4,depth4)', nthreads=1)
 tim('alpha, beta = eos.eos_rab4(T4,S4,depth4)', nthreads=4)
+print('\n new polynomial expansion of EOS-80')
+eos.eos_init(0)
+tim('rho = eos.eos_insitu4(T4,S4,depth4)', nthreads=1)
+tim('rho = eos.eos_insitu4(T4,S4,depth4)', nthreads=4)
+tim('rho = eos.eos_insitu4_m(fillvalue, mask,T4,S4,depth4)', nthreads=1)
+tim('rho = eos.eos_insitu4_m(fillvalue, mask,T4,S4,depth4)', nthreads=4)
+tim('rho = eos.eos_insitu04(2.5,35.0,1.,depth4)', nthreads=1)
+tim('rho = eos.eos_insitu04(2.5,35.0,1.,depth4)', nthreads=4)
+tim('alpha, beta = eos.eos_rab4(T4,S4,depth4)', nthreads=1)
+tim('alpha, beta = eos.eos_rab4(T4,S4,depth4)', nthreads=4)
+
 print('\n NEMO TEOS-10')
 eos.eos_init(2)
 tim('rho = eos.eos_insitu4(T4,S4,depth4)', nthreads=1)
@@ -46,6 +58,12 @@ tim('rho = eos.eos_insitu04(2.5,35.0,1.,depth4)', nthreads=1)
 tim('rho = eos.eos_insitu04(2.5,35.0,1.,depth4)', nthreads=4)
 tim('alpha, beta = eos.eos_rab4(T4,S4,depth4)', nthreads=1)
 tim('alpha, beta = eos.eos_rab4(T4,S4,depth4)', nthreads=4)
+
+try:
+    from gsw import density
+except:
+    sys.exit("gsw not installed. To check against gsw library need to do\n"
+             "mamba install gsw")
 
 print('\n GSW TEOS-10')
 tim0('rho = density.rho(S4,T4,depth4)')
