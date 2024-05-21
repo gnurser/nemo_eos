@@ -3,8 +3,8 @@ echo $1
 function isolate_build(){
     echo doing isolated build
     #make proper build environment with mamba
-    git clone theia:~agn/Bare/nemo_eos.git
-    cd nemo_eos
+    # git clone theia:~agn/Bare/nemo_eos.git
+    # cd nemo_eos
     mamba install compilers numpy
     export PREFIX_OUT=$CONDA_PREFIX
     mamba env create -f  nemo_eos_dev.yml
@@ -26,8 +26,8 @@ function isolate_build(){
 function run_build(){
     #just add build requirements to mamba run environment
     echo doing run build
-    git clone theia:~agn/Bare/nemo_eos.git
-    cd nemo_eos
+    # git clone theia:~agn/Bare/nemo_eos.git
+    # cd nemo_eos
     mamba install compilers numpy
     mamba install meson-python pkg-config #=>
 
