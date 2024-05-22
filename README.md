@@ -170,6 +170,13 @@ and the values it produces; otherwise it is just internal comparisons.
 	cd test
 	ipython threads.ipy
 ```
+Default is to test for array 1e6 long, and 1 vs 4 threads. Can do `1` vs
+	`nthreads` and change array_length with the following. Note spaces
+	and double dash.
+	
+```bash
+	ipython -- threads.ipy --nthreads=16 --array_length=1.e7
+```
 
 ## Explore
 
