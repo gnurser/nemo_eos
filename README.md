@@ -172,7 +172,9 @@ and the values it produces; otherwise it is just internal comparisons.
 ```
 Default is to test for array 1e6 long, and 1 vs 4 threads. Can do `1` vs
 	`nthreads` and change array_length with the following. Note spaces
-	and double dash.
+	and double dash. Experience so far suggests `nthreads=4` is good on
+    a laptop, but can increase to `nthreads=16` on a unix server;
+    gives a speedup of at least 10x.
 	
 ```bash
 	ipython -- threads.ipy --nthreads=16 --array_length=1.e7
@@ -192,13 +194,18 @@ Default is to test for array 1e6 long, and 1 vs 4 threads. Can do `1` vs
    In [2]: eos.rho0
    Out[2]: array(1026.)
 
+   In [3]: eos.set_eos_threads(16)
+
+   In [4]: eos.get_eos_threads()
+   Out[4]: 16
+
 ```
 
 Type in `eos.<TAB>` to get list of functions, options, constants etc. Then select routine with cursor keys
 
 ```
 
-   In [3]: eos.eos_insitu4_m
+   In [5]: eos.eos_insitu4_m
             eos_init        eos_insitu4_m   eos_rab_ref4    eos_sigman4     neos            rn_lambda1      rn_nu
             eos_insitu04    eos_pen4        eos_rab_ref4_m  eos_sigman4_m   rho0            rn_lambda2      set_eos
             eos_insitu04_m  eos_rab4        eos_sigma04     get_eos_threads rn_a0           rn_mu1          set_eos_threads
@@ -207,14 +214,14 @@ Type in `eos.<TAB>` to get list of functions, options, constants etc. Then selec
 Then when desired routine is selected, type <RET> and other options will disappear
 ```
 
-   In [3]: eos.eos_insitu4_m
+   In [5]: eos.eos_insitu4_m
 
 ```
 Then type ?<RET>, and ipython will give description of how to call the routine:
 
 ```
 
-   In [3]: eos.eos_insitu4_m?
+   In [5]: eos.eos_insitu4_m?
    Call signature: eos.rho_mn4(*args, **kwargs)
    Type:           fortran
    String form:    <fortran function eos_insitu4_m>
