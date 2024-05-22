@@ -98,7 +98,7 @@ Then git clone the source from github and move into new directory
 Build and install
 
 ```
-   ../dev.bash
+   ./dev.bash
 ```
 
 This first installs some required mamba packages into the `big`
