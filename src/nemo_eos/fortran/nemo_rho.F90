@@ -1072,7 +1072,7 @@ CONTAINS
       !!
       !!     np_teos10 : polynomial TEOS-10
       !!          Check values for SA = 30 g/kg, CT = 10 degC, Z = -1000 m:
-      !!          a = alpha*rho0 = 0.179646281 kg m−3 K-1 , b = beta*rho0 = 0.765555368 kg m-3 (g/kg)-1 .
+      !!          a = alpha*rho0 = 0.179646281 kg m-3 K-1 , b = beta*rho0 = 0.765555368 kg m-3 (g/kg)-1 .
       !!
       !!
       !!     np_eos80 : polynomial EOS-80 equation of state is used for alpha, beta.
