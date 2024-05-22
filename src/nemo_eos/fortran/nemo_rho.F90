@@ -175,7 +175,7 @@ CONTAINS
       !!  with
       !!     r0(z) = rho(35.16504g/kg,4 deg,z) - rho(35.16504g/kg,4 deg,0 m)
       !!       as defined in A.1 of Roquet et al. (2015)
-      !! Check value for Z = −1000 m: r0 = 4.59763035 kg /m^3
+      !! Check value for Z = -1000 m: r0 = 4.59763035 kg /m^3
       !!
       !!----------------------------------------------------------------------
       REAL*8, INTENT(IN) ::   depth_km
@@ -1071,8 +1071,8 @@ CONTAINS
       !!                beta     saline contraction coeficient TEOS-10 [kg/g] or EOS80 [psu^{-1}]
       !!
       !!     np_teos10 : polynomial TEOS-10
-      !!          Check values for SA = 30 g/kg, CT = 10◦C, Z = −1000 m:
-      !!          a = alpha*rho0 = 0.179646281 kg m−3 K−1 , b = beta*rho0 = 0.765555368 kg m−3 (g/kg)−1 .
+      !!          Check values for SA = 30 g/kg, CT = 10 degC, Z = -1000 m:
+      !!          a = alpha*rho0 = 0.179646281 kg m−3 K-1 , b = beta*rho0 = 0.765555368 kg m-3 (g/kg)-1 .
       !!
       !!
       !!     np_eos80 : polynomial EOS-80 equation of state is used for alpha, beta.
