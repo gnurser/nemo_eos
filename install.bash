@@ -45,5 +45,10 @@ if [[ $1 == isolate_build ]]
 then
     isolate_build
 else
-    run_build
+    if [[ $CONDA_DEFAULT_ENV != 'base' ]]
+    then
+        run_build
+    else
+	echo You are in mamba base environment. You should be in a different environment.
+    fi
 fi
