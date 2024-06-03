@@ -49,8 +49,32 @@ initialised, uses:
 
 ## Pre-installation
 
+I suggest that you use a conda or mamba installation of python. If you have neither, mamba is the one to install at is  it faster and more reliable. First make sure that you have a `~/.bash_profile` file that reads your `~/.bashrc` i.e the `~/.bash_profile` file includes lines like
+```bash
+	if [ -f ~/.bashrc ]; then
+        . ~/.bashrc   # --> Read ~/.bashrc, if present.
+	fi
+```
+If the file`~/.bash_profile` does not include such lines, then add the above, ideally immediately after `/etc/bashrc` is read
+
+If you have no `~/.bash_profile` file then create one:
+```bash
+	cat >> ~/.bash_profile << END
+>       # not necessary but probably useful
+>	if [ -f /etc/bashrc ]; then
+>        . /etc/bashrc   # --> Read /etc/bashrc, if present.
+>	fi
+>       # essential
+>	if [ -f ~/.bashrc ]; then
+>        . ~/.bashrc   # --> Read ~/.bashrc, if present.
+>	fi
+> END
+
+```
+Then download the  miniforge installer, and run it:
 ```bash
 	cd
+	# Remove any old python setups
 	rm -rf miniconda3 anaconda mambaforge
 	wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
 	sh Miniforge3-Linux-x86_64.sh
