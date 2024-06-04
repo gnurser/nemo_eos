@@ -103,7 +103,7 @@ and move into this environment
 First go into parent directory into which you want to download the package.
 
 ```
-    cd /path/to/parent
+    cd </path/to/parent>
 ```
 
 Then activate `big` environment if not previously done
@@ -199,12 +199,14 @@ Default is to test for array 1e6 long, and 1 vs 4 threads. Can do `1` vs
 	and double dash. Experience so far suggests `nthreads=4` is good on
     a laptop, but can increase to `nthreads=16` on a unix server;
     gives a speedup of at least 10x.
-	
+
 ```bash
 	ipython -- threads.ipy --nthreads=16 --array_length=1.e7
 ```
 
 ## Explore
+
+I have suggested using `ipython` here for simpliciy, but of course the below will also work in a Jupyter lab window.
 
 ```
    ipython
