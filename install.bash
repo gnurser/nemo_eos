@@ -1,4 +1,3 @@
-#!/bin/bash
 echo $1
 function isolate_build(){
     echo doing isolated build
