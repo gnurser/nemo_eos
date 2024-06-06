@@ -58,19 +58,24 @@ I suggest that you use a conda or mamba installation of python. If you have neit
 If the file`~/.bash_profile` does not include such lines, then add the above, ideally immediately after `/etc/bashrc` is read
 
 If you have no `~/.bash_profile` file then create one:
+Edit  `~/.bash_profile` with whatever editor you use, E.g. open the file with `vi`:
 ```bash
-	cat >> ~/.bash_profile << END
->       # not necessary but probably useful
->	if [ -f /etc/bashrc ]; then
->        . /etc/bashrc   # --> Read /etc/bashrc, if present.
->	fi
->       # essential
->	if [ -f ~/.bashrc ]; then
->        . ~/.bashrc   # --> Read ~/.bashrc, if present.
->	fi
-> END
-
+	vi ~/.bash_profile
+	i
 ```
+Paste the code below into vi
+
+```bash
+	# not necessary but probably useful
+	if [ -f /etc/bashrc ]; then
+	 . /etc/bashrc   # --> Read /etc/bashrc, if present.
+	fi
+	# essential
+	if [ -f ~/.bashrc ]; then
+	 . ~/.bashrc   # --> Read ~/.bashrc, if present.
+	fi
+```
+Hit `esc` and then `:wq`
 Then download the  miniforge installer, and run it:
 ```bash
 	cd
@@ -122,7 +127,7 @@ Then git clone the source from github and move into new directory
 Build and install
 
 ```
-   ./install.bash
+   . install.bash
 ```
 
 This first installs some required mamba packages into the `big`
